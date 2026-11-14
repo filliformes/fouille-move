@@ -363,7 +363,7 @@ static void compute_descriptors(float *pcm, int len, float *centroid, float *lou
 
 #define MINIMP3_IMPLEMENTATION
 #define MINIMP3_FLOAT_OUTPUT
-#include "minimp3.h"
+#include "../engine/minimp3.h"
 
 /* ── Fetch Thread ───────────────────────────────────────────────────────── */
 

@@ -25,7 +25,7 @@
 
 #define MINIMP3_IMPLEMENTATION
 #define MINIMP3_FLOAT_OUTPUT
-#include "../src/dsp/minimp3.h"
+#include "../engine/minimp3.h"
 
 static const char *CURL_CANDIDATES[] = {
     "/data/UserData/schwung/bin/curl",

@@ -1,0 +1,21 @@
+{
+  "id": "fouille",
+  "name": "Fouille",
+  "abbrev": "FOUIL",
+  "version": "0.3.0",
+  "description": "Une voix du proche et du lointain : 16 voix qui ecoutent des lieux du Quebec (Radio Aporee, Freesound par GPS) et les sculptent au LPG a vactrol.",
+  "author": "Vincent Fillion (Filliformes)",
+  "license": "MIT",
+  "dsp": "dsp.so",
+  "ui": "ui.js",
+  "api_version": 2,
+  "component_type": "overtake",
+  "capabilities": {
+    "audio_out": true,
+    "midi_in": true,
+    "aftertouch": true,
+    "claims_master_knob": false,
+    "suspend_keeps_js": true,
+    "button_passthrough": [ 85 ]
+  }
+}

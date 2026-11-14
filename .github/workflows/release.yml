@@ -16,7 +16,7 @@ jobs:
       - name: Verify version consistency
         run: |
           TAG_VERSION="${GITHUB_REF#refs/tags/v}"
-          JSON_VERSION=$(jq -r '.version' src/module.json)
+          JSON_VERSION=$(jq -r '.version' move/module.json)
           if [ "$TAG_VERSION" != "$JSON_VERSION" ]; then
             echo "ERROR: Tag version ($TAG_VERSION) does not match module.json version ($JSON_VERSION)"
             exit 1
