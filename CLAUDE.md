@@ -1,5 +1,15 @@
 # Fouille — Claude Code context
 
+## Status (2026-11-14): moving to v3
+**Read `fouille-design-v3.md` first.** It replaces the v2 design for architecture, surface and
+sources: Fouille becomes an **Overtake** module (16 voices on the left pads, 16 gestures on
+the right), anchored to an atlas of Quebec places (Montréal first, then Saguenay, Kamouraska),
+fed by field recordings (Aporee, Freesound by GPS), live MP3 web radios, local sound maps and
+the Move's input, with a web map (github.io + served by the Move). Everything below describes
+the v0.2 sound_generator that is still in `src/`; it has never been verified on a Move.
+Step 0 tools: `tools/fouille_probe.c` (static ARM64, built by `scripts/build.sh`) and
+`scripts/netcheck.sh` (runs `scripts/device-netcheck.sh` on the Move, brings the log back).
+
 ## What this is
 Network microsound excavator for Ableton Move. Fetches sounds from Freesound/Internet Archive
 via wifi, sculpts them with vactrol LPG envelopes. Inspired by Emiliano Pennisi's Envion/Endogen/Interfera.
