@@ -16,6 +16,16 @@ MSYS_NO_PATHCONV=1 docker run --rm \
     "/build/src/dsp/$MODULE_ID.c" \
     -lm -lpthread
 
+# Step 0 network probe: static, so it runs whatever glibc the Move has.
+MSYS_NO_PATHCONV=1 docker run --rm \
+  -v "$ROOT:/build" \
+  schwung-builder \
+  aarch64-linux-gnu-gcc \
+    -O2 -static \
+    -o "/build/dist/fouille_probe" \
+    "/build/tools/fouille_probe.c" \
+    -lm
+
 cp "$ROOT/src/module.json" "$ROOT/dist/$MODULE_ID/"
 tar -czf "$ROOT/dist/$MODULE_ID-module.tar.gz" -C "$ROOT/dist" "$MODULE_ID/"
 echo "Built: dist/$MODULE_ID-module.tar.gz"

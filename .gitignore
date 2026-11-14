@@ -2,3 +2,5 @@ dist/
 build/
 *.o
 *.so
+netcheck-*.log
+freesound.key
