@@ -20,6 +20,9 @@
 | Sources | **Les quatre** : enregistrements de terrain, radios web en direct, cartes sonores du Québec, micro / entrée du Move. |
 | Territoire | **Montréal en profondeur d'abord**, puis l'autogéographie (**Saguenay, Kamouraska**, Montréal), puis d'autres lieux et une **carte libre** (un point n'importe où, Fouille cherche autour). |
 | Pads | **Partage à la Loopex** : 16 pads de gauche = des voix, 16 pads de droite = des gestes. |
+| Moteur / hôte | **Séparés dès l'étape 2** : un moteur en C pur et portable (`engine/`), un hôte Move (`move/`), plus tard un hôte Pandore. Voir §16. |
+| Pandore, « Ici » | **Les deux** : la géolocalisation par IP propose un point, vous le corrigez au montage sur la carte web. |
+| Pandore, place dans *Impressions* | **Un firmware au choix** : une boîte existante peut démarrer en Fouille plutôt qu'en Phasma, Res ou Essaim. |
 
 ## 1. L'intention
 
@@ -332,12 +335,53 @@ Une application statique (HTML / JS, sans étape de construction si possible), u
 |---|---|---|
 | **0** | `fouille_probe` + `netcheck.sh` (fait) : curl, HTTPS, Aporee, Freesound GPS, radios MP3, décodage | un journal rapporté du Move |
 | **1** | ce document | votre relecture |
-| **2** | squelette Overtake (`ui.js` + `dsp.so`), moteur v0.2 porté, 16 voix, bogues de §3 corrigés, gestes de gauche | sur le Move : pads, écran, son sans réseau (mémoire / synthèse) |
+| **2** | moteur portable `engine/` (testé hors ligne : rendu WAV + vérifications) + hôte Overtake (`ui.js` + `dsp.so`), moteur v0.2 porté, 16 voix, bogues de §3 corrigés, gestes de gauche | sur le Move : pads, écran, son sans réseau (mémoire / synthèse) |
 | **3** | atlas : format, relecture à chaud, Montréal (quartiers, coordonnées), Freesound par GPS, Aporee | une voix ancrée au Plateau qui récolte au Plateau |
 | **4** | carte web : version publique, puis version Move (écrit l'atlas, lit le statut) | la page ouverte sur github.io et depuis le Move |
 | **5** | moteur ondes : radios MP3, anneau, capter / écouter, syntonisation | une radio montréalaise captée dans une voix |
 | **6** | mémoire sur disque + crédits, micro (Ici), gestes de droite | un concert sans wifi |
 | **7** | Saguenay, Kamouraska, puis carte libre et cartes sonores locales | |
+
+## 16. Vers Pandore et *Impressions*
+
+Décidé le 2026-11-14 : après le Move, Fouille doit pouvoir tourner sur Pandore, sur la même
+base que Res, Phasma et Essaim, comme **un firmware au choix** d'une boîte de l'œuvre. Dans
+une logique in situ, il fait entendre **ce que l'internet connaît de l'environnement autour
+de la salle**, à côté de ce que le micro entend dedans.
+
+**Moteur ≠ hôte, dès l'étape 2** (la règle de Res, Phasma, Essaim et RECORDA) :
+
+```
+engine/   C99 pur, aucune dépendance (libm, pthreads). Voix, LPG, gestes, atlas, mémoire,
+          travailleurs réseau (curl par popen). Fréquence et taille de bloc en paramètre :
+          44,1 kHz / 128 sur le Move, 48 kHz sur Pandore. Interface en événements de contrôle
+          normalisés (0..1), comme le MCU de Pandore.
+tests/    rendu WAV + vérifications sur des RELATIONS (méthode audioapp), sans réseau
+          (des fragments de test sur disque).
+move/     dsp.so (move_plugin_init_v2) + ui.js Overtake : les 32 pads, les pages, l'écran.
+pandore/  (plus tard) miniaudio duplex, le panneau web, file SPSC, net/coord.c et
+          net/audionet.c copiés tels quels de Phasma, config TOML relue à chaud.
+```
+
+**Deux visages, un moteur.** La profondeur du Move (16 voix, 16 gestes, pages) ne passe pas
+telle quelle sur le panneau de Pandore (K1-K4, deux pads XY, fader, inclinaison, tapes sur
+les côtés, encodeur, capteur de présence). La version Pandore est **simplexifiée** : elle se
+joue en 20 secondes. À concevoir à l'étape Pandore ; une première idée : le pad gauche =
+proche ↔ loin (rayon autour d'Ici) × présent ↔ retenu (radio en direct ↔ mémoire), le pad
+droit = les gestes, le capteur de présence = un visiteur qui s'approche fait venir les voix
+les plus proches.
+
+**« Ici »** : à l'installation, la géolocalisation par IP propose un point (souvent faux de
+quelques km : c'est la ville du fournisseur), vous le corrigez sur la carte web. L'atlas
+garde ce lieu ; les sons géolocalisés, les radios locales et les cartes sonores autour de lui
+deviennent la matière principale.
+
+**Dans l'écologie** : Fouille prend la niche de **la voix d'ailleurs** sur le bus de
+coordination (le régulateur d'énergie lui laisse la place des voix parlées et des textures
+lointaines, et le rythme et le grave à Phasma).
+
+**Concat et Loopex sur Pandore** : à décider plus tard, séparément. Fouille sert de premier
+cas pour la séparation moteur / hôte d'un module Move.
 
 ## 15. Questions ouvertes
 
