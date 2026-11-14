@@ -12,9 +12,9 @@ STAGE="/data/UserData/.fouille-stage"
 
 [ -f "dist/$MODULE_ID/dsp.so" ] || { echo "no dist/$MODULE_ID/dsp.so: run ./scripts/build.sh first"; exit 1; }
 echo "staging to $MOVE_HOST ..."
-ssh "root@$MOVE_HOST" "mkdir -p $STAGE"
-scp "dist/$MODULE_ID/dsp.so" "dist/$MODULE_ID/module.json" "dist/$MODULE_ID/ui.js" "root@$MOVE_HOST:$STAGE/"
-ssh "root@$MOVE_HOST" "set -e
+ssh -o ConnectTimeout=8 "root@$MOVE_HOST" "mkdir -p $STAGE"
+scp -o ConnectTimeout=8 "dist/$MODULE_ID/dsp.so" "dist/$MODULE_ID/module.json" "dist/$MODULE_ID/ui.js" "root@$MOVE_HOST:$STAGE/"
+ssh -o ConnectTimeout=8 "root@$MOVE_HOST" "set -e
   mkdir -p $DEST
   for f in dsp.so module.json ui.js; do mv -f $STAGE/\$f $DEST/\$f; done
   rmdir $STAGE

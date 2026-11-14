@@ -23,6 +23,13 @@
 | Moteur / hôte | **Séparés dès l'étape 2** : un moteur en C pur et portable (`engine/`), un hôte Move (`move/`), plus tard un hôte Pandore. Voir §16. |
 | Pandore, « Ici » | **Les deux** : la géolocalisation par IP propose un point, vous le corrigez au montage sur la carte web. |
 | Pandore, place dans *Impressions* | **Un firmware au choix** : une boîte existante peut démarrer en Fouille plutôt qu'en Phasma, Res ou Essaim. |
+| Longueur d'une voix | **30 s stéréo** (réponse du 2026-11-14). |
+| Gestes de droite | **À construire en jammant ensemble.** Orientés vers la transformation, l'adjacent, la mémoire, le passé, le futur, les possibles, la recontextualisation ; expressifs avec la pression des pads, comme Loopex. La liste du §9 n'est qu'un point de départ. |
+| Radios | Proposition à écouter (toutes en MP3, trouvées sur radio-browser.info le 2026-11-14) : Montréal **CIBL 101,5** (à confirmer : l'entrée s'appelle « La Cible »), **CISM 89,3**, **CKUT 90,3** ; Québec **CKIA 88,3** ; Saguenay **CKAJ 92,5** ; Kamouraska **CHOX-FM 97,5** (La Pocatière). |
+| Langue | **Français** seulement (écran et carte). |
+| Noms | voix, ondes, usure, mémoire, Ici : **gardés**. |
+| Site public | **Dans ce dépôt** (rendu public, github.io). |
+| Aporee par position | **Vérifié** : chaque item porte `latitude`/`longitude`. L'API accepte une plage de latitude (pas une longitude négative) : on cherche par bande de latitude + `coverage:Canada`, puis on filtre la distance dans le module. |
 
 ## 1. L'intention
 

@@ -16,7 +16,14 @@ via wifi, sculpts them with vactrol LPG envelopes. Inspired by Emiliano Pennisi'
 Schwung sound generator. API: plugin_api_v2_t. Language: C (with pthreads).
 Voice architecture: 8-voice polyphonic, round-robin stealing.
 
-## Repo structure
+## Repo structure (v0.3, Overtake — supersedes the v0.2 notes below)
+- `engine/` — portable C99 engine (fe.h API): voices, DSP, harvest worker (Aporee + Freesound by GPS), built-in atlas
+- `move/` — Move host: `fouille_move.c` (plugin_api_v2 + string-param bridge), `ui.js` (Overtake UI), `module.json` (version lives here)
+- `tests/` — `render_test.c` (offline relation tests, run by build.sh), `net_test.c` (live harvest, run ON the Move)
+- `legacy/` — the v0.2 sound_generator, kept for reference, not built
+- Install path is now `modules/overtake/fouille/`; install by atomic rename (`scripts/install.sh`)
+
+## Repo structure (v0.2, legacy)
 - `src/dsp/fouille.c` — all DSP logic (vactrol LPG, fetch thread, corpus navigator, ternary envelope, render_block)
 - `src/module.json` — module metadata and version (must match git tag on release)
 - `scripts/build.sh` — Docker ARM64 cross-compile (always use this)
