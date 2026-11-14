@@ -5,17 +5,18 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Fouille</title>
 <meta name="description" content="Fouille : une voix du proche et du lointain. Un instrument pour Ableton Move (Schwung, Overtake) dont les 16 voix écoutent des lieux du Québec, par Radio Aporee et Freesound.">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css" crossorigin="anonymous">
 <style>
   :root{
-    --bg:#0d0d0b; --bg2:#13120f; --panel:#1a1814; --panel2:#221f1a; --line:#2f2b24;
-    --ink:#efe9df; --dim:#a69d8f; --faint:#6d665a;
-    --accent:#d9824b; --accent2:#a3c48e; --hot:#e0574a; --sky:#7fb2d6;
+    --bg:#0e0d0c; --bg2:#141210; --panel:#1a1816; --panel2:#221f1c; --line:#2f2b27;
+    --ink:#efe9e2; --dim:#a79e93; --faint:#6e665d;
+    --accent:#f97316; --accent2:#2dd4bf; --hot:#f43f5e; --sky:#60a5fa;
     --mono:"SFMono-Regular",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
     --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
   }
   *{box-sizing:border-box}
   html{scroll-behavior:smooth}
-  body{margin:0;background:radial-gradient(1200px 800px at 75% -10%,#1d1810 0%,var(--bg) 55%) fixed;color:var(--ink);font-family:var(--sans);line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+  body{margin:0;background:radial-gradient(1200px 800px at 75% -10%,#1f1712 0%,var(--bg) 55%) fixed;color:var(--ink);font-family:var(--sans);line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
   a{color:var(--accent);text-decoration:none}
   a:hover{text-decoration:underline}
   h1,h2,h3{line-height:1.15;letter-spacing:-.01em;font-weight:650}
@@ -66,11 +67,11 @@
   .tablewrap{overflow-x:auto}
   .note{border-left:3px solid var(--accent2);background:var(--panel);padding:10px 14px;border-radius:0 10px 10px 0;color:var(--dim);margin:14px 0}
   .note b{color:var(--ink)}
-  .chantier{display:flex;gap:10px;align-items:flex-start;border:1px dashed var(--accent);background:rgba(217,130,75,.07);border-radius:12px;padding:10px 14px;color:var(--dim);margin:18px 0;font-size:.92rem}
+  .chantier{display:flex;gap:10px;align-items:flex-start;border:1px dashed var(--accent);background:rgba(249,115,22,.07);border-radius:12px;padding:10px 14px;color:var(--dim);margin:18px 0;font-size:.92rem}
   .chantier b{color:var(--accent)}
   .etat{display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:1px 8px;border:1px solid var(--line);white-space:nowrap;vertical-align:middle}
-  .etat.fait{color:var(--accent2);border-color:rgba(163,196,142,.4)}
-  .etat.cours{color:var(--accent);border-color:rgba(217,130,75,.45)}
+  .etat.fait{color:var(--accent2);border-color:rgba(45,212,191,.4)}
+  .etat.cours{color:var(--accent);border-color:rgba(249,115,22,.45)}
   .etat.venir{color:var(--faint)}
   .pipeline{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin:20px 0}
   .pipeline .st{flex:1 1 120px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:.82rem;color:var(--dim)}
@@ -79,7 +80,7 @@
   /* l'atlas */
   .atlas{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:18px;margin:20px 0}
   .mapbox{background:#0a0a08;border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative}
-  .mapbox svg{display:block;width:100%;height:auto}
+  .mapbox #map{display:block;width:100%;height:auto}
   .mapbox .legend{position:absolute;left:10px;bottom:8px;font-size:.7rem;color:var(--faint);font-family:var(--mono)}
   .place{cursor:pointer}
   .halo{fill:var(--accent);fill-opacity:.04;stroke:var(--accent);stroke-opacity:.16;stroke-width:1;pointer-events:none}
@@ -105,6 +106,33 @@
   .fiche .links a:hover{border-color:var(--accent);text-decoration:none}
   .quebec{margin-top:14px;align-items:start}
   .quebec svg{display:block;width:100%;height:auto;max-height:360px;background:#0a0a08;border:1px solid var(--line);border-radius:14px}
+  #lmap{display:none;height:min(78vh,640px);background:#0a0a08}
+  .live #lmap{display:block}
+  .live #map{display:none}
+  .live .quebec{grid-template-columns:1fr}
+  .live .quebec > div:first-child{display:none}
+  .mapnav{display:none;gap:6px;margin:8px 0 0;flex-wrap:wrap}
+  .live .mapnav{display:flex}
+  .mapnav button,.sons button{background:var(--panel);border:1px solid var(--line);color:var(--ink);border-radius:8px;padding:4px 10px;font:600 .8rem var(--sans);cursor:pointer}
+  .mapnav button:hover,.sons button:hover{border-color:var(--accent)}
+  .sons{margin-top:12px;border-top:1px solid var(--line);padding-top:10px}
+  .sons .go{background:var(--accent);border-color:var(--accent);color:#1a0d04}
+  .sons ol{list-style:none;padding:0;margin:8px 0 0;max-height:300px;overflow-y:auto}
+  .sons li{display:grid;grid-template-columns:28px minmax(0,1fr);gap:8px;padding:6px 0;border-bottom:1px solid var(--line);font-size:.84rem}
+  .sons li button{width:28px;height:28px;padding:0;border-radius:50%}
+  .sons li.on button{background:var(--accent2);border-color:var(--accent2);color:#04201c}
+  .sons .t{color:var(--ink);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .sons .m{color:var(--faint);font-size:.74rem}
+  .sons .m a{color:var(--dim)}
+  .sons .msg{color:var(--faint);font-size:.82rem;margin:6px 0}
+  .sons audio{width:100%;margin-top:8px;height:34px}
+  .leaflet-container{font-family:var(--sans)}
+  .leaflet-tooltip{background:var(--panel2);color:var(--ink);border:1px solid var(--line);box-shadow:none;font-size:.78rem}
+  .leaflet-tooltip-left:before{border-left-color:var(--line)}
+  .leaflet-tooltip-right:before{border-right-color:var(--line)}
+  .leaflet-control-attribution{background:rgba(14,13,12,.8)!important;color:var(--faint)!important}
+  .leaflet-control-attribution a{color:var(--dim)!important}
+  .leaflet-bar a{background:var(--panel2)!important;color:var(--ink)!important;border-color:var(--line)!important}
   /* l'écran du Move */
   .screenbox{display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0}
   .tabs{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
@@ -123,7 +151,7 @@
   .gestes{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;max-width:420px;margin:16px 0}
   .gestes div{aspect-ratio:1;border-radius:7px;border:1px dashed #3a352d;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:.7rem;text-align:center;padding:4px}
   .words{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
-  .words span{font-family:var(--mono);font-size:.78rem;color:var(--accent2);background:rgba(163,196,142,.07);border:1px solid rgba(163,196,142,.25);border-radius:999px;padding:2px 10px}
+  .words span{font-family:var(--mono);font-size:.78rem;color:var(--accent2);background:rgba(45,212,191,.07);border:1px solid rgba(45,212,191,.25);border-radius:999px;padding:2px 10px}
   footer{color:var(--faint);font-size:.8rem;padding:40px 0 0;border-top:1px solid var(--line);margin-top:40px}
   @media (max-width:980px){
     .atlas{grid-template-columns:1fr}
@@ -138,6 +166,7 @@
     main{padding:0 16px 80px}
     .g2,.g3{grid-template-columns:1fr}
     .hero{padding:36px 0 20px}
+    #lmap{height:60vh}
   }
 </style>
 </head>
@@ -189,16 +218,17 @@
     <a class="btn" href="#jouer">Comment ça se joue</a>
     <a class="btn" href="https://github.com/filliformes/fouille-move">GitHub</a>
   </div>
-  <div class="chantier"><span>⛏</span><div><b>En chantier.</b> Fouille se construit en ce moment, à découvert. Ce site suit l'instrument : ce qui est marqué <span class="etat fait">fait</span> existe dans le code, <span class="etat cours">en cours</span> se construit, <span class="etat venir">à venir</span> est prévu. Aucune version n'est encore publiée.</div></div>
+  <p class="lede">J'ai fait Fouille pour entendre des lieux du Québec par ce qu'ils publient eux-mêmes : les miens, ceux de mes gens. Je le joue comme on fouille un terrain : sans savoir ce qui va remonter.</p>
+  <div class="chantier"><span>⛏</span><div><b>En chantier.</b> Je construis Fouille en ce moment, à découvert. Ce site suit l'instrument : ce qui est marqué <span class="etat fait">fait</span> existe dans le code, <span class="etat cours">en cours</span> se construit, <span class="etat venir">à venir</span> est prévu. Aucune version n'est encore publiée.</div></div>
 </section>
 
 <section id="idee">
   <div class="eyebrow">L'idée</div>
   <h2>Capter, retenir, laisser s'user, rendre</h2>
-  <p class="lede">Fouille fait entendre des lieux du Québec par ce qu'ils publient eux-mêmes : des enregistrements de terrain déposés sous licence libre, des radios communautaires qui émettent en ce moment, et le son de la pièce où vous jouez. L'instrument ne compose pas ces voix. Il les capte, les garde un temps, les laisse s'user à chaque passage, et vous les rend.</p>
-  <p class="lede">La matière n'est pas choisie : elle est trouvée. Mais elle n'est plus trouvée n'importe où. Elle est trouvée chez soi et chez les siens.</p>
+  <p class="lede">Ce que Fouille fait entendre, ce sont des enregistrements de terrain déposés sous licence libre, des radios communautaires qui émettent en ce moment, et le son de la pièce où je joue. Je ne compose pas ces voix. L'instrument les capte, les garde un temps, les laisse s'user à chaque passage, puis me les rend.</p>
+  <p class="lede">Je ne choisis pas la matière : je la trouve. Le geste vient d'Emiliano Pennisi, qui laisse le réseau apporter le son. Ce qui change avec Fouille, c'est que je ne la trouve plus n'importe où. Je la trouve chez moi et chez les miens.</p>
   <div class="grid g2">
-    <div class="card k"><h3>Proche et loin</h3><p>Le micro, ici et maintenant, contre le réseau : là-bas, ou il y a dix ans. Sur l'écran comme sur la carte, la pièce où vous jouez porte un nom : <b>Ici</b>.</p></div>
+    <div class="card k"><h3>Proche et loin</h3><p>Le micro, ici et maintenant, contre le réseau : là-bas, ou il y a dix ans. Sur l'écran comme sur la carte, la pièce où je joue porte un nom : <b>Ici</b>.</p></div>
     <div class="card t"><h3>Vivant et retenu</h3><p>Une radio qui parle en ce moment, contre un fragment figé qui s'érode chaque fois qu'il passe. Entre les deux, la <b>mémoire</b> : ce qui a déjà été capté, gardé avec son auteur.</p></div>
   </div>
   <div class="pipeline">
@@ -218,8 +248,10 @@
     <div>
     <div class="mapbox">
       <svg id="map" viewBox="0 0 560 520" role="img" aria-label="Les seize quartiers de Montréal, placés selon leurs coordonnées"></svg>
+      <div id="lmap" role="region" aria-label="Carte de Montréal et du Québec"></div>
     </div>
-    <div class="padcap" style="margin-top:6px">positions approximatives (± 300 m) · le cercle est le rayon de recherche</div>
+    <div class="mapnav"><button type="button" data-z="mtl">Montréal</button><button type="button" data-z="qc">Tout le Québec</button></div>
+    <div class="padcap" style="margin-top:6px">positions approximatives (± 300 m) · le cercle est le rayon de recherche · les points verts sont des sons de Radio Aporee</div>
     </div>
     <div class="side">
       <div class="pads" id="pads" aria-label="Les 16 pads de gauche du Move"></div>
@@ -233,16 +265,16 @@
     </div>
     <div class="card s">
       <h3>Au-delà de Montréal</h3>
-      <p>Montréal d'abord, en profondeur. Viennent ensuite les lieux d'une autogéographie : le <b>Saguenay</b>, le <b>Kamouraska</b>, la ville de <b>Québec</b>. Ces lieux sont déjà dans l'atlas du module ; une voix peut s'y ancrer depuis la page Lieu. Plus tard, une carte libre : un point posé n'importe où, et Fouille cherche autour.</p>
+      <p>Je commence par Montréal, en profondeur. Viennent ensuite les lieux de mon autogéographie : le <b>Saguenay</b>, le <b>Kamouraska</b>, la ville de <b>Québec</b>. Ces lieux sont déjà dans l'atlas du module ; une voix peut s'y ancrer depuis la page Lieu. Le bouton « Tout le Québec », sous la carte, les montre. Plus tard, une carte libre : je pose un point n'importe où, et Fouille cherche autour.</p>
     </div>
   </div>
-  <div class="note"><b>Ce qui vient ici.</b> Cette carte deviendra l'atlas sonore public : un vrai fond de carte, les sons géolocalisés écoutables dans le navigateur, les radios, les itinéraires. La même page, ouverte depuis le Move, servira à préparer un concert : choisir les lieux, écrire ce qu'ils sont pour vous, et les envoyer à l'instrument.</div>
+  <div class="note"><b>Ce qui vient ici.</b> Cette carte deviendra l'atlas sonore public : les sons de Freesound à côté de ceux d'Aporee, les radios, les itinéraires. La même page, ouverte depuis le Move, servira à préparer un concert : choisir les lieux, écrire ce qu'ils sont pour vous, et les envoyer à l'instrument.</div>
 </section>
 
 <section id="sources">
   <div class="eyebrow">Les sources</div>
   <h2>D'où vient la matière</h2>
-  <p class="lede">Chaque source rend un fragment audio et sa fiche : titre, auteur, licence, adresse, date, coordonnées. La fiche suit le fragment partout, sur l'écran, dans la mémoire et ici. C'est ce qui permet de respecter les licences, et c'est aussi ce qui rend les voix à leurs auteurs.</p>
+  <p class="lede">Chaque source rend un fragment audio et sa fiche : titre, auteur, licence, adresse, date, coordonnées. La fiche suit le fragment partout, sur l'écran, dans la mémoire et ici. Je tiens à cette fiche : c'est ce qui permet de respecter les licences, et c'est aussi ce qui rend les voix à leurs auteurs.</p>
   <div class="grid g2">
     <div class="card k"><h3>Radio Aporee <span class="etat fait">fait</span></h3><p>Une carte mondiale d'enregistrements de terrain, archivée sur Internet Archive, ouverte et sans clé. Chaque enregistrement porte sa latitude et sa longitude : Fouille cherche par bande de latitude au Canada, puis garde ce qui tombe dans le rayon du lieu.</p></div>
     <div class="card k"><h3>Freesound par position <span class="etat fait">fait</span></h3><p>Freesound sait chercher autour d'un point : « tout ce qui a été enregistré à moins de 2 km du marché Jean-Talon » devient une seule requête. Il faut une clé gratuite (voir <a href="#installer">Installer</a>). Quand le rayon est vide, Fouille cherche par mots.</p></div>
@@ -290,10 +322,10 @@
   </table></div>
 
   <h3 id="j-droite">Les pads de droite : les gestes <span class="etat cours">en jam</span></h3>
-  <p>Les seize gestes ne sont pas écrits d'avance. Ils se trouvent en jouant, avec la pression des pads comme dans Loopex. Ce qui les oriente :</p>
+  <p>Je n'ai pas écrit les seize gestes d'avance. Je les trouve en jouant, avec la pression des pads comme dans Loopex. Ce qui m'oriente :</p>
   <div class="words"><span>transformer</span><span>l'adjacent</span><span>la mémoire</span><span>le passé</span><span>le futur</span><span>les possibles</span><span>recontextualiser</span></div>
   <div class="gestes" aria-hidden="true"><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div></div>
-  <p class="note">Cette grille se remplira au fil des séances.</p>
+  <p class="note">Je remplirai cette grille au fil des séances.</p>
 </section>
 
 <section id="pages">
@@ -384,7 +416,7 @@
 <section id="installer">
   <div class="eyebrow">Installer</div>
   <h2>Avant la première version</h2>
-  <p class="lede">Fouille n'est pas encore publié dans le Schwung Manager. Quand il le sera, cette section donnera le lien et les étapes. Ce qu'il faudra :</p>
+  <p class="lede">Je n'ai pas encore publié Fouille dans le Schwung Manager. Quand ce sera fait, je mettrai ici le lien et les étapes. Ce qu'il faudra :</p>
   <div class="grid g3">
     <div class="card"><h3>Un Move avec Schwung</h3><p>Fouille est un module Overtake : il s'installe dans <code>modules/overtake/fouille/</code>.</p></div>
     <div class="card"><h3>Le wifi</h3><p>Le Move doit être en ligne pour fouiller. Tout le réseau passe en arrière-plan, jamais dans le fil audio.</p></div>
@@ -414,15 +446,15 @@
   <h2>Des voix qui ont des auteurs</h2>
   <div class="grid g3">
     <div class="card"><h3>Les fragments</h3><p>Les enregistrements de Radio Aporee et de Freesound gardent leur fiche et leur licence Creative Commons. L'écran Crédits les montre. Publier une pièce faite avec eux demande de respecter ces licences.</p></div>
-    <div class="card"><h3>Les radios</h3><p>Jouées en direct comme matière. Ce site ne diffusera jamais d'enregistrement de radio : il donnera seulement le lien de la station.</p></div>
-    <div class="card"><h3>Les gens</h3><p>Ce sont des voix publiques, déposées ou émises volontairement. Mais ce sont des voix. Fouille les montre avec leur nom ; il ne les rend pas anonymes.</p></div>
+    <div class="card"><h3>Les radios</h3><p>Jouées en direct comme matière. Je ne diffuserai jamais d'enregistrement de radio sur ce site : je donnerai seulement le lien de la station.</p></div>
+    <div class="card"><h3>Les gens</h3><p>Ce sont des voix publiques, déposées ou émises volontairement. Mais ce sont des voix. Je les montre avec leur nom ; je ne les rends pas anonymes.</p></div>
   </div>
 </section>
 
 <section id="credits">
   <div class="eyebrow">Filiation et crédits</div>
   <h2>D'où vient Fouille</h2>
-  <p class="lede">Fouille descend directement du travail d'<b>Emiliano Pennisi</b> (Avenir) : <a href="https://github.com/aveniridm/envion">Envion</a> (le son trouvé sur le réseau, le geste de désauteuriser), <a href="https://www.peamarte.it/endogen/main.html">Endogen</a> (la dynamique du vactrol, le lowercase, la navigation dans un corpus) et <a href="https://www.peamarte.it/interfera/interfera_landing.html">Interfera</a> (la récolte géosonique, Internet Archive, le Spectral Lock, l'érosion). Aucun code n'en est repris ; la filiation est d'idées, et elle est reconnue.</p>
+  <p class="lede">Fouille descend directement du travail d'<b>Emiliano Pennisi</b> (Avenir) : <a href="https://github.com/aveniridm/envion">Envion</a> (le son trouvé sur le réseau, le geste de désauteuriser), <a href="https://www.peamarte.it/endogen/main.html">Endogen</a> (la dynamique du vactrol, le lowercase, la navigation dans un corpus) et <a href="https://www.peamarte.it/interfera/interfera_landing.html">Interfera</a> (la récolte géosonique, Internet Archive, le Spectral Lock, l'érosion). Je n'en ai repris aucun code ; la filiation est d'idées, et je la reconnais.</p>
   <div class="tablewrap"><table>
     <tr><th>Quoi</th><th>Merci à</th></tr>
     <tr><td><b>Enregistrements de terrain</b></td><td><a href="https://aporee.org/maps/">Radio Aporee</a> et ses contributeurs, archivé par <a href="https://archive.org/details/radio-aporee-maps">Internet Archive</a></td></tr>
@@ -437,6 +469,7 @@
 </main>
 </div>
 
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js" crossorigin="anonymous"></script>
 <script>
 /* L'atlas de départ du module (engine/fe_atlas.c) : centres approximatifs (± 300 m).
    Le pad i joue le lieu i. Les noms courts sont ceux de l'écran du Move. */
@@ -481,9 +514,9 @@ const grid = el('g', {stroke:'#1d1b17', 'stroke-width':1}, map);
 for (let x = 0; x <= MW; x += PX) el('line', {x1:x, y1:0, x2:x, y2:MH}, grid);
 for (let y = 0; y <= MH; y += PX) el('line', {x1:0, y1:y, x2:MW, y2:y}, grid);
 const scale = el('g', {}, map);
-el('line', {x1:MW-20-2*PX, y1:MH-18, x2:MW-20, y2:MH-18, stroke:'#6d665a', 'stroke-width':2}, scale);
-el('text', {x:MW-20-PX, y:MH-24, 'text-anchor':'middle', fill:'#6d665a', 'font-size':10, 'font-family':'ui-monospace,monospace'}, scale).textContent = '2 km';
-el('text', {x:MW-20, y:16, 'text-anchor':'end', fill:'#6d665a', 'font-size':10, 'font-family':'ui-monospace,monospace'}, scale).textContent = 'N ↑';
+el('line', {x1:MW-20-2*PX, y1:MH-18, x2:MW-20, y2:MH-18, stroke:'#6e665d', 'stroke-width':2}, scale);
+el('text', {x:MW-20-PX, y:MH-24, 'text-anchor':'middle', fill:'#6e665d', 'font-size':10, 'font-family':'ui-monospace,monospace'}, scale).textContent = '2 km';
+el('text', {x:MW-20, y:16, 'text-anchor':'end', fill:'#6e665d', 'font-size':10, 'font-family':'ui-monospace,monospace'}, scale).textContent = 'N ↑';
 
 const halos = el('g', {}, map), dots = el('g', {}, map);
 const placeEls = PLACES.map((p, i) => {
@@ -529,7 +562,11 @@ function select(i){
      <div class="links">
        <a href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}" target="_blank" rel="noopener">Voir sur OpenStreetMap</a>
        <a href="https://freesound.org/browse/geotags/?c_lat=${lat}&c_lon=${lon}&z=15" target="_blank" rel="noopener">Sons Freesound autour</a>
-     </div>`;
+     </div>
+     <div class="sons" id="sons"><button type="button" class="go" id="sons-go">Écouter ce qui a été enregistré ici</button>
+       <div class="msg">Les enregistrements de Radio Aporee dans ce rayon, lus depuis Internet Archive.</div></div>`;
+  document.getElementById('sons-go').addEventListener('click', () => listen(i));
+  if (window.onSelect) window.onSelect(i);
   drawScreen();
 }
 
@@ -544,14 +581,14 @@ function select(i){
   for (let lo = -74; lo <= -69; lo++) { const [x] = pq(46, lo); el('line', {x1:x, y1:0, x2:x, y2:H}, g); }
   for (let la = 45; la <= 49; la++) { const [, y] = pq(la, -70); el('line', {x1:0, y1:y, x2:W, y2:y}, g); }
   const pts = FAR.map(p => pq(p.lat, p.lon));
-  el('polyline', {points: [pts[0], pts[1], pts[3], pts[2]].map(p => p.join(',')).join(' '), fill:'none', stroke:'#a3c48e', 'stroke-opacity':.35, 'stroke-dasharray':'3 5'}, qc);
+  el('polyline', {points: [pts[0], pts[1], pts[3], pts[2]].map(p => p.join(',')).join(' '), fill:'none', stroke:'#2dd4bf', 'stroke-opacity':.35, 'stroke-dasharray':'3 5'}, qc);
   FAR.forEach((p, i) => {
     const [x, y] = pts[i];
-    el('circle', {cx:x, cy:y, r: i === 0 ? 6 : 4, fill: i === 0 ? '#d9824b' : '#a3c48e'}, qc);
-    const t = el('text', {x:x + 9, y:y + 4, fill:'#efe9df', 'font-size':13, 'font-family':'system-ui,sans-serif'}, qc);
+    el('circle', {cx:x, cy:y, r: i === 0 ? 6 : 4, fill: i === 0 ? '#f97316' : '#2dd4bf'}, qc);
+    const t = el('text', {x:x + 9, y:y + 4, fill:'#efe9e2', 'font-size':13, 'font-family':'system-ui,sans-serif'}, qc);
     t.textContent = p.n;
   });
-  el('text', {x:10, y:H - 10, fill:'#6d665a', 'font-size':10, 'font-family':'ui-monospace,monospace'}, qc).textContent = 'une ligne par degré · le pointillé : un itinéraire possible';
+  el('text', {x:10, y:H - 10, fill:'#6e665d', 'font-size':10, 'font-family':'ui-monospace,monospace'}, qc).textContent = 'une ligne par degré · le pointillé : un itinéraire possible';
 })();
 
 /* l'écran du Move (128 × 64), d'après ui.js */
@@ -613,6 +650,129 @@ document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click
   document.querySelectorAll('#tabs button').forEach(c => c.classList.toggle('on', c === b));
   drawScreen();
 }));
+/* ---- écouter : Radio Aporee par Internet Archive ----
+   Recherche par bande de latitude dans la collection radio-aporee-maps,
+   puis on garde ce qui tombe dans le rayon (même méthode que le module). */
+const IA = 'https://archive.org';
+function distKm(a, b, c, d){ const dy = (a - c) * 111.32, dx = (b - d) * 111.32 * Math.cos((a + c) / 2 * Math.PI / 180); return Math.hypot(dx, dy); }
+function first(v){ return Array.isArray(v) ? v[0] : v; }
+function esc(t){ return String(t == null ? '' : t).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'})[c]); }
+function licName(u){
+  if (!u) return 'licence non indiquée';
+  const m = String(u).match(/licenses\/([a-z-]+)\/([\d.]+)/i);
+  return m ? 'CC ' + m[1].toUpperCase() + ' ' + m[2] : 'licence';
+}
+const cache = {};
+let audio = null, playing = null, token = 0;
+async function searchAporee(p){
+  const r = Math.max(p.km, 1.0);
+  const dl = r / 111.32;
+  const q = `collection:radio-aporee-maps AND latitude:[${(p.lat - dl).toFixed(4)} TO ${(p.lat + dl).toFixed(4)}]`;
+  const url = `${IA}/advancedsearch.php?q=${encodeURIComponent(q)}` +
+    ['identifier','title','creator','date','latitude','longitude','licenseurl'].map(f => '&fl[]=' + f).join('') +
+    '&rows=400&output=json';
+  const res = await fetch(url);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const js = await res.json();
+  return (js.response && js.response.docs || []).map(d => ({
+    id: d.identifier, title: first(d.title) || d.identifier, creator: first(d.creator) || 'auteur inconnu',
+    date: String(first(d.date) || '').slice(0, 10), lic: first(d.licenseurl),
+    lat: parseFloat(first(d.latitude)), lon: parseFloat(first(d.longitude)),
+  })).filter(d => isFinite(d.lat) && isFinite(d.lon))
+     .map(d => (d.km = distKm(p.lat, p.lon, d.lat, d.lon), d))
+     .filter(d => d.km <= r)
+     .sort((a, b) => a.km - b.km);
+}
+async function mp3Of(id){
+  const res = await fetch(`${IA}/metadata/${encodeURIComponent(id)}`);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const js = await res.json();
+  const files = (js.files || []).filter(f => /\.mp3$/i.test(f.name));
+  files.sort((a, b) => (/_64kb|sample/i.test(a.name) ? 1 : 0) - (/_64kb|sample/i.test(b.name) ? 1 : 0));
+  if (!files.length) throw new Error('pas de MP3');
+  return `${IA}/download/${encodeURIComponent(id)}/${files[0].name.split('/').map(encodeURIComponent).join('/')}`;
+}
+async function listen(i){
+  const box = document.getElementById('sons'), p = PLACES[i], my = ++token;
+  box.innerHTML = '<div class="msg">Recherche autour de ' + esc(p.n) + '…</div>';
+  let list;
+  try { list = cache[i] || (cache[i] = await searchAporee(p)); }
+  catch (e) {
+    if (my !== token) return;
+    box.innerHTML = `<div class="msg">La recherche n'a pas répondu (${esc(e.message)}). <a href="https://aporee.org/maps/" target="_blank" rel="noopener">Ouvrir Radio Aporee</a></div>`;
+    return;
+  }
+  if (my !== token || sel !== i) return;
+  if (window.showSounds) window.showSounds(list);
+  if (!list.length) { box.innerHTML = '<div class="msg">Rien encore sur Radio Aporee dans ce rayon. C\'est une place à enregistrer.</div>'; return; }
+  box.innerHTML = `<div class="msg">${list.length} enregistrement${list.length > 1 ? 's' : ''} dans le rayon, du plus proche au plus loin.</div><ol id="sons-l"></ol><audio id="sons-a" controls preload="none"></audio>`;
+  const ol = document.getElementById('sons-l');
+  audio = document.getElementById('sons-a');
+  list.slice(0, 40).forEach((d, k) => {
+    const li = document.createElement('li');
+    li.innerHTML = `<button type="button" aria-label="Écouter">▶</button><div><div class="t" title="${esc(d.title)}">${esc(d.title)}</div>
+      <div class="m">${esc(d.creator)}${d.date ? ' · ' + esc(d.date) : ''} · à ${d.km < 1 ? Math.round(d.km * 1000) + ' m' : d.km.toFixed(1).replace('.', ',') + ' km'} ·
+      ${d.lic ? `<a href="${esc(d.lic)}" target="_blank" rel="noopener">${esc(licName(d.lic))}</a>` : 'licence non indiquée'} ·
+      <a href="${IA}/details/${encodeURIComponent(d.id)}" target="_blank" rel="noopener">fiche</a></div></div>`;
+    li.querySelector('button').addEventListener('click', () => play(d, li));
+    d.li = li;
+    ol.appendChild(li);
+  });
+}
+async function play(d, li){
+  if (!audio) return;
+  if (playing === d && !audio.paused) { audio.pause(); return; }
+  document.querySelectorAll('.sons li.on').forEach(x => x.classList.remove('on'));
+  if (li) li.classList.add('on');
+  playing = d;
+  try {
+    d.src = d.src || await mp3Of(d.id);
+    if (playing !== d) return;
+    audio.src = d.src; await audio.play();
+  } catch (e) {
+    if (li) li.querySelector('.m').insertAdjacentHTML('beforeend', ` · <b style="color:var(--hot)">lecture impossible (${esc(e.message)})</b>`);
+  }
+}
+window.playSound = d => play(d, d.li);
+
+/* ---- le vrai fond de carte, si Leaflet a pu se charger ---- */
+if (window.L) (function(){
+  document.getElementById('atlas').classList.add('live');
+  const lm = L.map('lmap', {zoomControl: true, attributionControl: true, scrollWheelZoom: false});
+  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+    subdomains: 'abcd', maxZoom: 19,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">les contributeurs d\'OpenStreetMap</a> &copy; <a href="https://carto.com/attributions">CARTO</a>',
+  }).addTo(lm);
+  lm.attributionControl.setPrefix('<a href="https://leafletjs.com">Leaflet</a>');
+  const MTL = L.latLngBounds(PLACES.map(p => [p.lat, p.lon])).pad(0.12);
+  const QC = L.latLngBounds(FAR.map(p => [p.lat, p.lon])).pad(0.15);
+  const C = getComputedStyle(document.documentElement);
+  const ACC = C.getPropertyValue('--accent').trim(), ACC2 = C.getPropertyValue('--accent2').trim(), DIM = C.getPropertyValue('--dim').trim();
+  const rings = [], pins = [];
+  PLACES.forEach((p, i) => {
+    rings[i] = L.circle([p.lat, p.lon], {radius: p.km * 1000, color: ACC, weight: 1, opacity: .25, fillOpacity: .03, interactive: false}).addTo(lm);
+    pins[i] = L.circleMarker([p.lat, p.lon], {radius: 6, color: '#000', weight: 1, fillColor: DIM, fillOpacity: 1})
+      .bindTooltip(`${i + 1} · ${p.n}`, {direction: 'right', offset: [8, 0]})
+      .on('click', () => select(i)).addTo(lm);
+  });
+  FAR.slice(1).forEach(p => L.circleMarker([p.lat, p.lon], {radius: 6, color: '#000', weight: 1, fillColor: ACC2, fillOpacity: 1})
+    .bindTooltip(p.n, {permanent: true, direction: 'right', offset: [8, 0]}).addTo(lm));
+  const sounds = L.layerGroup().addTo(lm);
+  window.onSelect = i => {
+    sounds.clearLayers();
+    rings.forEach((r, j) => r.setStyle(j === i ? {opacity: .9, fillOpacity: .12, dashArray: '5 4'} : {opacity: .25, fillOpacity: .03, dashArray: null}));
+    pins.forEach((m, j) => m.setStyle({fillColor: j === i ? ACC : DIM, radius: j === i ? 8 : 6}));
+    pins[i].openTooltip();
+    if (lm._loaded && !lm.getBounds().contains(rings[i].getBounds())) lm.fitBounds(MTL);
+  };
+  window.showSounds = list => {
+    sounds.clearLayers();
+    list.slice(0, 40).forEach(d => L.circleMarker([d.lat, d.lon], {radius: 4, color: '#000', weight: 1, fillColor: ACC2, fillOpacity: .9})
+      .bindTooltip(d.title, {direction: 'top'}).on('click', () => window.playSound(d)).addTo(sounds));
+  };
+  lm.fitBounds(MTL);
+  document.querySelectorAll('.mapnav button').forEach(b => b.addEventListener('click', () => lm.flyToBounds(b.dataset.z === 'qc' ? QC : MTL, {duration: .8})));
+})();
 select(0);
 </script>
 </body>
