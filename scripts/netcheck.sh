@@ -13,14 +13,15 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DIR=/data/UserData/fouille-check
 PROBE="$ROOT/dist/fouille_probe"
 
-[ -f "$PROBE" ] || { echo "missing $PROBE: run ./scripts/build.sh first"; exit 1; }
+[ -f "$PROBE" ] || { echo "missing $PROBE: run ./scripts/build.sh first, or download fouille_probe into dist/"; exit 1; }
 
 echo "copying to $MOVE_USER@$MOVE_HOST:$DIR ..."
 ssh "$MOVE_USER@$MOVE_HOST" "mkdir -p $DIR"
 FILES=("$PROBE" "$ROOT/scripts/device-netcheck.sh")
 [ -f "$ROOT/freesound.key" ] && FILES+=("$ROOT/freesound.key")
 scp "${FILES[@]}" "$MOVE_USER@$MOVE_HOST:$DIR/"
-ssh "$MOVE_USER@$MOVE_HOST" "chmod +x $DIR/fouille_probe && sh $DIR/device-netcheck.sh"
+# sed: a Windows checkout may have turned the script's line endings into CRLF.
+ssh "$MOVE_USER@$MOVE_HOST" "sed -i 's/\r\$//' $DIR/device-netcheck.sh && chmod +x $DIR/fouille_probe && sh $DIR/device-netcheck.sh"
 
 OUT="$ROOT/netcheck-$(date +%Y%m%d-%H%M).log"
 scp "$MOVE_USER@$MOVE_HOST:$DIR/netcheck.log" "$OUT"
