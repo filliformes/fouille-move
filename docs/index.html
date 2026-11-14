@@ -1,0 +1,619 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Fouille</title>
+<meta name="description" content="Fouille : une voix du proche et du lointain. Un instrument pour Ableton Move (Schwung, Overtake) dont les 16 voix écoutent des lieux du Québec, par Radio Aporee et Freesound.">
+<style>
+  :root{
+    --bg:#0d0d0b; --bg2:#13120f; --panel:#1a1814; --panel2:#221f1a; --line:#2f2b24;
+    --ink:#efe9df; --dim:#a69d8f; --faint:#6d665a;
+    --accent:#d9824b; --accent2:#a3c48e; --hot:#e0574a; --sky:#7fb2d6;
+    --mono:"SFMono-Regular",ui-monospace,"Cascadia Code",Menlo,Consolas,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Inter,system-ui,sans-serif;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;background:radial-gradient(1200px 800px at 75% -10%,#1d1810 0%,var(--bg) 55%) fixed;color:var(--ink);font-family:var(--sans);line-height:1.6;font-size:16px;-webkit-font-smoothing:antialiased}
+  a{color:var(--accent);text-decoration:none}
+  a:hover{text-decoration:underline}
+  h1,h2,h3{line-height:1.15;letter-spacing:-.01em;font-weight:650}
+  h2{font-size:clamp(1.5rem,3vw,2.1rem);margin:0 0 .3em}
+  h3{font-size:1.12rem;margin:1.6em 0 .4em;color:#fff}
+  p{margin:.6em 0}
+  code,kbd{font-family:var(--mono);font-size:.86em}
+  code{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:.05em .35em}
+  kbd{background:var(--panel2);border:1px solid var(--line);border-bottom-width:2px;border-radius:5px;padding:.06em .42em;color:#fff;white-space:nowrap;font-size:.8em}
+  .wrap{display:grid;grid-template-columns:200px minmax(0,1fr)}
+  nav{position:sticky;top:0;align-self:start;height:100vh;overflow-y:auto;padding:16px 10px 12px 14px;border-right:1px solid var(--line);scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}
+  nav .brand{font-weight:750;font-size:1.2rem;letter-spacing:.02em;margin-bottom:2px}
+  nav .brand b{color:var(--accent)}
+  nav .tag{color:var(--faint);font-size:.68rem;text-transform:uppercase;letter-spacing:.14em;margin-bottom:10px}
+  nav a{display:block;color:var(--dim);padding:2px 10px;border-radius:6px;font-size:.82rem;line-height:1.3}
+  nav a:hover{color:var(--ink);background:var(--panel);text-decoration:none}
+  nav .subs{display:flex;flex-wrap:wrap;padding:0 4px 3px 16px}
+  nav .subs a{display:inline-block;padding:0 6px;font-size:.72rem;line-height:1.45;color:var(--faint)}
+  main{padding:0 clamp(18px,4vw,56px) 120px;min-width:0;max-width:1120px}
+  section{padding:46px 0 8px;border-top:1px solid var(--line)}
+  .lede{color:var(--dim);font-size:1.05rem;max-width:90ch}
+  .eyebrow{color:var(--accent);font-family:var(--mono);font-size:.74rem;letter-spacing:.18em;text-transform:uppercase;margin-bottom:.7em}
+  .hero{padding:70px 0 30px;border:none}
+  .hero h1{font-size:clamp(2.8rem,8vw,4.8rem);margin:.1em 0 .15em;letter-spacing:-.03em;background:linear-gradient(120deg,#fff 15%,var(--accent) 55%,var(--accent2));-webkit-background-clip:text;background-clip:text;color:transparent}
+  .hero .sub{font-size:clamp(1.05rem,2.4vw,1.35rem);color:var(--dim);max-width:68ch}
+  .pills{display:flex;flex-wrap:wrap;gap:6px;margin:22px 0 6px}
+  .pill{background:var(--panel);border:1px solid var(--line);border-radius:999px;padding:4px 10px;font-size:.76rem;color:var(--dim);white-space:nowrap}
+  .pill b{color:var(--accent)}
+  .cta{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 8px}
+  .btn{display:inline-flex;align-items:center;gap:8px;padding:10px 16px;border-radius:10px;border:1px solid var(--line);background:var(--panel);color:var(--ink);font-weight:600;font-size:.95rem}
+  .btn:hover{text-decoration:none;border-color:var(--accent)}
+  .btn.primary{background:var(--accent);border-color:var(--accent);color:#1a0d04}
+  .btn small{font-weight:400;color:inherit;opacity:.75}
+  .grid{display:grid;gap:14px;margin:18px 0}
+  .g2{grid-template-columns:1fr 1fr}
+  .g3{grid-template-columns:repeat(3,1fr)}
+  .card{background:linear-gradient(180deg,var(--panel),var(--bg2));border:1px solid var(--line);border-radius:14px;padding:18px 20px}
+  .card h3{margin-top:0}
+  .card.k{border-left:3px solid var(--accent)}
+  .card.t{border-left:3px solid var(--accent2)}
+  .card.s{border-left:3px solid var(--sky)}
+  table{width:100%;border-collapse:collapse;margin:14px 0;font-size:.9rem}
+  th,td{text-align:left;padding:8px 11px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{background:var(--panel2);color:var(--dim);font-weight:600;font-size:.76rem;text-transform:uppercase;letter-spacing:.06em}
+  td:first-child{white-space:nowrap}
+  td b{color:#fff}
+  .tablewrap{overflow-x:auto}
+  .note{border-left:3px solid var(--accent2);background:var(--panel);padding:10px 14px;border-radius:0 10px 10px 0;color:var(--dim);margin:14px 0}
+  .note b{color:var(--ink)}
+  .chantier{display:flex;gap:10px;align-items:flex-start;border:1px dashed var(--accent);background:rgba(217,130,75,.07);border-radius:12px;padding:10px 14px;color:var(--dim);margin:18px 0;font-size:.92rem}
+  .chantier b{color:var(--accent)}
+  .etat{display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.06em;text-transform:uppercase;border-radius:999px;padding:1px 8px;border:1px solid var(--line);white-space:nowrap;vertical-align:middle}
+  .etat.fait{color:var(--accent2);border-color:rgba(163,196,142,.4)}
+  .etat.cours{color:var(--accent);border-color:rgba(217,130,75,.45)}
+  .etat.venir{color:var(--faint)}
+  .pipeline{display:flex;flex-wrap:wrap;align-items:stretch;gap:6px;margin:20px 0}
+  .pipeline .st{flex:1 1 120px;background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:10px 12px;font-size:.82rem;color:var(--dim)}
+  .pipeline .st b{display:block;color:#fff;font-size:.92rem;margin-bottom:2px}
+  .pipeline .ar{align-self:center;color:var(--faint)}
+  /* l'atlas */
+  .atlas{display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr);gap:18px;margin:20px 0}
+  .mapbox{background:#0a0a08;border:1px solid var(--line);border-radius:14px;overflow:hidden;position:relative}
+  .mapbox svg{display:block;width:100%;height:auto}
+  .mapbox .legend{position:absolute;left:10px;bottom:8px;font-size:.7rem;color:var(--faint);font-family:var(--mono)}
+  .place{cursor:pointer}
+  .halo{fill:var(--accent);fill-opacity:.04;stroke:var(--accent);stroke-opacity:.16;stroke-width:1;pointer-events:none}
+  .place .dot{fill:var(--dim)}
+  .place text{fill:var(--dim);font-size:11px;font-family:var(--sans);pointer-events:none}
+  .place:hover .dot,.place.on .dot{fill:var(--accent)}
+  .place:hover text,.place.on text{fill:#fff}
+  .halo.on{fill-opacity:.14;stroke-opacity:.85;stroke-dasharray:4 3}
+  .side{display:flex;flex-direction:column;gap:14px;min-width:0}
+  .pads{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;background:#121110;border:1px solid var(--line);border-radius:14px;padding:12px}
+  .pad{aspect-ratio:1;border-radius:7px;border:1px solid #2b2823;background:#1c1a17;color:var(--faint);font:600 .74rem var(--mono);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;padding:2px;text-align:center;line-height:1.1}
+  .pad span{font:500 .6rem var(--sans);color:var(--faint);overflow:hidden;text-overflow:ellipsis;max-width:100%;white-space:nowrap}
+  .pad:hover{border-color:var(--accent)}
+  .pad.on{background:var(--accent);border-color:var(--accent);color:#1a0d04}
+  .pad.on span{color:#1a0d04}
+  .padcap{font-size:.75rem;color:var(--faint);text-align:center;margin-top:-6px}
+  .fiche{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:14px 16px}
+  .fiche h3{margin:0 0 .2em}
+  .fiche .meta{font-family:var(--mono);font-size:.76rem;color:var(--faint)}
+  .fiche p{font-size:.9rem;color:var(--dim)}
+  .fiche .links{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+  .fiche .links a{font-size:.8rem;border:1px solid var(--line);border-radius:8px;padding:3px 9px;color:var(--ink)}
+  .fiche .links a:hover{border-color:var(--accent);text-decoration:none}
+  .quebec{margin-top:14px;align-items:start}
+  .quebec svg{display:block;width:100%;height:auto;max-height:360px;background:#0a0a08;border:1px solid var(--line);border-radius:14px}
+  /* l'écran du Move */
+  .screenbox{display:flex;flex-direction:column;align-items:center;gap:8px;margin:16px 0}
+  .tabs{display:flex;gap:6px;flex-wrap:wrap;justify-content:center}
+  .tabs button{background:var(--panel);border:1px solid var(--line);color:var(--dim);border-radius:999px;padding:4px 12px;font:600 .8rem var(--sans);cursor:pointer}
+  .tabs button.on{border-color:var(--accent);color:#fff}
+  svg.screen{width:min(100%,512px);height:auto;background:#000;border-radius:8px;border:6px solid #1c1c1c;box-shadow:0 0 0 1px #333,0 20px 50px rgba(0,0,0,.5)}
+  svg.screen text{font-family:var(--mono);font-size:8px;fill:#fff}
+  .caption{color:var(--faint);font-size:.82rem;text-align:center;max-width:62ch}
+  /* les états */
+  .cycle{display:flex;flex-wrap:wrap;gap:6px;align-items:center;margin:16px 0}
+  .cycle .s{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:6px 12px;font-size:.85rem}
+  .cycle .s b{color:#fff}
+  .cycle .s small{display:block;color:var(--faint);font-size:.72rem}
+  .cycle .ar{color:var(--faint)}
+  /* gestes de droite */
+  .gestes{display:grid;grid-template-columns:repeat(4,1fr);gap:7px;max-width:420px;margin:16px 0}
+  .gestes div{aspect-ratio:1;border-radius:7px;border:1px dashed #3a352d;display:flex;align-items:center;justify-content:center;color:var(--faint);font-size:.7rem;text-align:center;padding:4px}
+  .words{display:flex;flex-wrap:wrap;gap:6px;margin:10px 0}
+  .words span{font-family:var(--mono);font-size:.78rem;color:var(--accent2);background:rgba(163,196,142,.07);border:1px solid rgba(163,196,142,.25);border-radius:999px;padding:2px 10px}
+  footer{color:var(--faint);font-size:.8rem;padding:40px 0 0;border-top:1px solid var(--line);margin-top:40px}
+  @media (max-width:980px){
+    .atlas{grid-template-columns:1fr}
+    .g3{grid-template-columns:1fr 1fr}
+  }
+  @media (max-width:820px){
+    .wrap{grid-template-columns:1fr}
+    nav{position:static;height:auto;border-right:0;border-bottom:1px solid var(--line);display:flex;flex-wrap:wrap;gap:2px 4px;padding:12px 16px}
+    nav .brand,nav .tag{width:100%}
+    nav .subs{display:none}
+    nav a{padding:2px 8px}
+    main{padding:0 16px 80px}
+    .g2,.g3{grid-template-columns:1fr}
+    .hero{padding:36px 0 20px}
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+<nav>
+  <div class="brand"><b>Fouille</b></div>
+  <div class="tag">En chantier · v0.3</div>
+  <a href="#top">Accueil</a>
+  <a href="#idee">L'idée</a>
+  <a href="#atlas">La carte des voix</a>
+  <a href="#sources">Les sources</a>
+  <a href="#jouer">Jouer</a>
+  <div class="subs">
+  <a href="#j-gauche">Voix</a>
+  <a href="#j-boutons">Boutons</a>
+  <a href="#j-droite">Gestes</a>
+  </div>
+  <a href="#pages">Les pages</a>
+  <div class="subs">
+  <a href="#p-lieu">Lieu</a>
+  <a href="#p-geste">Geste</a>
+  <a href="#p-matiere">Matière</a>
+  <a href="#p-espace">Espace</a>
+  </div>
+  <a href="#ecran">L'écran</a>
+  <a href="#vie">La vie d'une voix</a>
+  <a href="#installer">Installer</a>
+  <a href="#route">Feuille de route</a>
+  <a href="#egards">Droits et égards</a>
+  <a href="#credits">Filiation et crédits</a>
+</nav>
+<main>
+
+<section class="hero" id="top">
+  <div class="eyebrow">Ableton Move · module Overtake pour Schwung</div>
+  <h1>Fouille</h1>
+  <p class="sub">Une voix du proche et du lointain. Seize voix, chacune ancrée à un lieu de Montréal, qui vont chercher sur l'internet ce que ce lieu a fait entendre, et que vous jouez sur les pads du Move.</p>
+  <div class="pills">
+    <span class="pill"><b>16</b> voix, une par pad</span>
+    <span class="pill"><b>16</b> quartiers de Montréal</span>
+    <span class="pill">Radio Aporee et Freesound <b>par GPS</b></span>
+    <span class="pill">vélocité et <b>pression</b> des pads</span>
+    <span class="pill">LPG à vactrol</span>
+    <span class="pill">pages Lieu · Geste · Matière · Espace</span>
+  </div>
+  <div class="cta">
+    <a class="btn primary" href="#atlas">Explorer la carte</a>
+    <a class="btn" href="#jouer">Comment ça se joue</a>
+    <a class="btn" href="https://github.com/filliformes/fouille-move">GitHub</a>
+  </div>
+  <div class="chantier"><span>⛏</span><div><b>En chantier.</b> Fouille se construit en ce moment, à découvert. Ce site suit l'instrument : ce qui est marqué <span class="etat fait">fait</span> existe dans le code, <span class="etat cours">en cours</span> se construit, <span class="etat venir">à venir</span> est prévu. Aucune version n'est encore publiée.</div></div>
+</section>
+
+<section id="idee">
+  <div class="eyebrow">L'idée</div>
+  <h2>Capter, retenir, laisser s'user, rendre</h2>
+  <p class="lede">Fouille fait entendre des lieux du Québec par ce qu'ils publient eux-mêmes : des enregistrements de terrain déposés sous licence libre, des radios communautaires qui émettent en ce moment, et le son de la pièce où vous jouez. L'instrument ne compose pas ces voix. Il les capte, les garde un temps, les laisse s'user à chaque passage, et vous les rend.</p>
+  <p class="lede">La matière n'est pas choisie : elle est trouvée. Mais elle n'est plus trouvée n'importe où. Elle est trouvée chez soi et chez les siens.</p>
+  <div class="grid g2">
+    <div class="card k"><h3>Proche et loin</h3><p>Le micro, ici et maintenant, contre le réseau : là-bas, ou il y a dix ans. Sur l'écran comme sur la carte, la pièce où vous jouez porte un nom : <b>Ici</b>.</p></div>
+    <div class="card t"><h3>Vivant et retenu</h3><p>Une radio qui parle en ce moment, contre un fragment figé qui s'érode chaque fois qu'il passe. Entre les deux, la <b>mémoire</b> : ce qui a déjà été capté, gardé avec son auteur.</p></div>
+  </div>
+  <div class="pipeline">
+    <div class="st"><b>Un lieu</b>coordonnées, rayon, mots</div><span class="ar">→</span>
+    <div class="st"><b>La récolte</b>ce qui a été enregistré autour</div><span class="ar">→</span>
+    <div class="st"><b>La fiche</b>titre, auteur, licence</div><span class="ar">→</span>
+    <div class="st"><b>La voix</b>un pad, 30 s de stéréo</div><span class="ar">→</span>
+    <div class="st"><b>L'usure</b>chaque passage l'efface un peu</div>
+  </div>
+</section>
+
+<section id="atlas">
+  <div class="eyebrow">La carte des voix</div>
+  <h2>Seize pads, seize quartiers</h2>
+  <p class="lede">Au départ, chaque pad de gauche est ancré à un quartier de Montréal. Touchez un pad ou un point : vous voyez où cette voix va chercher sa matière, et dans quel rayon. Sur le Move, la page <a href="#p-lieu">Lieu</a> change l'ancrage de chaque voix.</p>
+  <div class="atlas">
+    <div>
+    <div class="mapbox">
+      <svg id="map" viewBox="0 0 560 520" role="img" aria-label="Les seize quartiers de Montréal, placés selon leurs coordonnées"></svg>
+    </div>
+    <div class="padcap" style="margin-top:6px">positions approximatives (± 300 m) · le cercle est le rayon de recherche</div>
+    </div>
+    <div class="side">
+      <div class="pads" id="pads" aria-label="Les 16 pads de gauche du Move"></div>
+      <div class="padcap">les 16 pads de gauche, vus du dessus · le pad 1 est en bas à gauche</div>
+      <div class="fiche" id="fiche"></div>
+    </div>
+  </div>
+  <div class="grid g2 quebec">
+    <div>
+      <svg id="qc" viewBox="0 0 560 300" role="img" aria-label="Montréal, Québec, Saguenay et Kamouraska"></svg>
+    </div>
+    <div class="card s">
+      <h3>Au-delà de Montréal</h3>
+      <p>Montréal d'abord, en profondeur. Viennent ensuite les lieux d'une autogéographie : le <b>Saguenay</b>, le <b>Kamouraska</b>, la ville de <b>Québec</b>. Ces lieux sont déjà dans l'atlas du module ; une voix peut s'y ancrer depuis la page Lieu. Plus tard, une carte libre : un point posé n'importe où, et Fouille cherche autour.</p>
+    </div>
+  </div>
+  <div class="note"><b>Ce qui vient ici.</b> Cette carte deviendra l'atlas sonore public : un vrai fond de carte, les sons géolocalisés écoutables dans le navigateur, les radios, les itinéraires. La même page, ouverte depuis le Move, servira à préparer un concert : choisir les lieux, écrire ce qu'ils sont pour vous, et les envoyer à l'instrument.</div>
+</section>
+
+<section id="sources">
+  <div class="eyebrow">Les sources</div>
+  <h2>D'où vient la matière</h2>
+  <p class="lede">Chaque source rend un fragment audio et sa fiche : titre, auteur, licence, adresse, date, coordonnées. La fiche suit le fragment partout, sur l'écran, dans la mémoire et ici. C'est ce qui permet de respecter les licences, et c'est aussi ce qui rend les voix à leurs auteurs.</p>
+  <div class="grid g2">
+    <div class="card k"><h3>Radio Aporee <span class="etat fait">fait</span></h3><p>Une carte mondiale d'enregistrements de terrain, archivée sur Internet Archive, ouverte et sans clé. Chaque enregistrement porte sa latitude et sa longitude : Fouille cherche par bande de latitude au Canada, puis garde ce qui tombe dans le rayon du lieu.</p></div>
+    <div class="card k"><h3>Freesound par position <span class="etat fait">fait</span></h3><p>Freesound sait chercher autour d'un point : « tout ce qui a été enregistré à moins de 2 km du marché Jean-Talon » devient une seule requête. Il faut une clé gratuite (voir <a href="#installer">Installer</a>). Quand le rayon est vide, Fouille cherche par mots.</p></div>
+    <div class="card t"><h3>Les ondes <span class="etat venir">à venir</span></h3><p>Des radios web en direct. Une voix pourra <b>écouter</b> une station, ou en <b>capter</b> une fenêtre qui devient un fragment retenu. Entre deux stations, un passage par le souffle, pour que changer de radio soit un geste et pas une coupure.</p></div>
+    <div class="card t"><h3>Ici <span class="etat venir">à venir</span></h3><p>L'entrée et le micro du Move. La seule source qui ne vient pas d'ailleurs : une voix pourra capter la pièce comme elle capte une radio.</p></div>
+  </div>
+  <h3>Les radios proposées, à écouter avant de les retenir</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Station</th><th>Lieu</th><th>État</th></tr>
+    <tr><td><b>CIBL 101,5</b></td><td>Montréal</td><td><span class="etat venir">à confirmer</span></td></tr>
+    <tr><td><b>CISM 89,3</b></td><td>Montréal</td><td><span class="etat venir">à écouter</span></td></tr>
+    <tr><td><b>CKUT 90,3</b></td><td>Montréal</td><td><span class="etat venir">à écouter</span></td></tr>
+    <tr><td><b>CKIA 88,3</b></td><td>Québec</td><td><span class="etat venir">à écouter</span></td></tr>
+    <tr><td><b>CKAJ 92,5</b></td><td>Saguenay</td><td><span class="etat venir">à écouter</span></td></tr>
+    <tr><td><b>CHOX-FM 97,5</b></td><td>Kamouraska (La Pocatière)</td><td><span class="etat venir">à écouter</span></td></tr>
+  </table></div>
+  <p class="note">Les flux en MP3 seulement pour commencer. Les cartes sonores du Québec viendront une à la fois, après lecture de leur licence.</p>
+</section>
+
+<section id="jouer">
+  <div class="eyebrow">Jouer</div>
+  <h2>Les mains sur le Move</h2>
+  <p class="lede">Fouille prend tout le Move, comme Loopex. Les 32 pads se partagent en deux : à gauche les voix, à droite les gestes.</p>
+
+  <h3 id="j-gauche">Les pads de gauche : les voix <span class="etat fait">fait</span></h3>
+  <div class="tablewrap"><table>
+    <tr><th>Geste</th><th>Ce qu'il fait</th></tr>
+    <tr><td><b>Tap</b></td><td>Joue ou arrête la voix. L'enveloppe et le LPG font l'attaque et la chute.</td></tr>
+    <tr><td><b>Tenir</b></td><td>La voix joue tant que vous tenez.</td></tr>
+    <tr><td><b>Vélocité</b></td><td>La frappe du LPG : plus fort, plus brillant et plus fort.</td></tr>
+    <tr><td><b>Pression</b></td><td>La voix s'ouvre sous le doigt.</td></tr>
+    <tr><td><b>Double tap</b></td><td>Figer ou libérer. Une voix figée n'est plus jamais remplacée par la récolte.</td></tr>
+    <tr><td><kbd>Shift</kbd> + <b>tap</b></td><td>Fouiller encore : un nouveau fragment du même lieu, qui prend la place de l'ancien à la fin de la note, jamais au milieu.</td></tr>
+  </table></div>
+
+  <h3 id="j-boutons">Les boutons <span class="etat fait">fait</span></h3>
+  <div class="tablewrap"><table>
+    <tr><th>Bouton</th><th>Ce qu'il fait</th></tr>
+    <tr><td><b>Boutons de pas 1-16</b></td><td>Choisir la voix que les knobs règlent.</td></tr>
+    <tr><td><kbd>▲</kbd> <kbd>▼</kbd></td><td>Voix suivante ou précédente.</td></tr>
+    <tr><td><kbd>◀</kbd> <kbd>▶</kbd></td><td>Page de réglages : Lieu, Geste, Matière, Espace.</td></tr>
+    <tr><td><b>Molette</b></td><td>La vue de l'écran : Voix, Carte, Crédits.</td></tr>
+    <tr><td><b>Knobs 1-8</b></td><td>Les réglages de la voix choisie, sur la page en cours. Toucher un knob affiche son nom.</td></tr>
+    <tr><td><kbd>Back</kbd></td><td>Suspendre : vous quittez l'écran, les voix continuent.</td></tr>
+  </table></div>
+
+  <h3 id="j-droite">Les pads de droite : les gestes <span class="etat cours">en jam</span></h3>
+  <p>Les seize gestes ne sont pas écrits d'avance. Ils se trouvent en jouant, avec la pression des pads comme dans Loopex. Ce qui les oriente :</p>
+  <div class="words"><span>transformer</span><span>l'adjacent</span><span>la mémoire</span><span>le passé</span><span>le futur</span><span>les possibles</span><span>recontextualiser</span></div>
+  <div class="gestes" aria-hidden="true"><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div><div>?</div></div>
+  <p class="note">Cette grille se remplira au fil des séances.</p>
+</section>
+
+<section id="pages">
+  <div class="eyebrow">Référence</div>
+  <h2>Les pages</h2>
+  <p class="lede">Chaque voix a ses réglages, sur quatre pages de huit knobs. Les flèches gauche et droite changent de page ; les boutons de pas changent de voix.</p>
+
+  <h3 id="p-lieu">Lieu : où la voix cherche</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Knob</th><th>Réglage</th><th>Valeurs</th><th>Ce qu'il fait</th></tr>
+    <tr><td>1</td><td><b>Lieu</b></td><td>16 quartiers, Montréal, Québec, Saguenay, Kamouraska</td><td>L'ancrage de la voix.</td></tr>
+    <tr><td>2</td><td><b>Source</b></td><td>Les deux · Aporee · Freesound</td><td>Où chercher.</td></tr>
+    <tr><td>3</td><td><b>Rayon</b></td><td>× 0,25 à × 4 du rayon du lieu</td><td>Rester au cœur du quartier, ou s'en éloigner.</td></tr>
+    <tr><td>4</td><td><b>Flux</b></td><td>Off, 10 s à 10 min</td><td>Le renouvellement : tous les combien la voix va chercher un nouveau fragment.</td></tr>
+    <tr><td>8</td><td><b>Volume</b></td><td>0 à 100 %</td><td>Le niveau de la voix.</td></tr>
+  </table></div>
+
+  <h3 id="p-geste">Geste : comment la voix parle</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Knob</th><th>Réglage</th><th>Valeurs</th><th>Ce qu'il fait</th></tr>
+    <tr><td>1</td><td><b>Rise</b></td><td>0,5 ms à 4 s</td><td>L'attaque de l'enveloppe, qui frappe le LPG.</td></tr>
+    <tr><td>2</td><td><b>Hold</b></td><td>Boucle · Dérive · Grains</td><td>Ce que fait la voix quand on la tient.</td></tr>
+    <tr><td>3</td><td><b>Fall</b></td><td>5 ms à 8 s</td><td>La chute, et la queue du vactrol.</td></tr>
+    <tr><td>4</td><td><b>Frappe</b></td><td>0 à 100 %</td><td>La non-linéarité du vactrol : de l'éclosion douce au claquement brillant.</td></tr>
+    <tr><td>5</td><td><b>Dispersion</b></td><td>0 à 100 %</td><td>La vélocité déplace aussi le point de départ dans le fragment.</td></tr>
+    <tr><td>6 · 7</td><td><b>Départ · Longueur</b></td><td>en secondes</td><td>La portion du fragment que la voix joue.</td></tr>
+    <tr><td>8</td><td><b>Sens</b></td><td>Avant · Arrière</td><td></td></tr>
+  </table></div>
+
+  <h3 id="p-matiere">Matière : ce que devient le son</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Knob</th><th>Réglage</th><th>Valeurs</th><th>Ce qu'il fait</th></tr>
+    <tr><td>1</td><td><b>Vitesse</b></td><td>× 0,25 à × 4</td><td>Lecture plus lente et plus grave, ou plus rapide.</td></tr>
+    <tr><td>2</td><td><b>Grain</b></td><td>10 à 500 ms</td><td>La taille des grains en mode Grains.</td></tr>
+    <tr><td>3</td><td><b>Lock</b></td><td>0 à 100 %</td><td>Un filtre résonant qui suit le son et en tire une hauteur.</td></tr>
+    <tr><td>4</td><td><b>Usure</b></td><td>0 à 100 %</td><td>À quelle vitesse la voix s'efface en jouant (voir <a href="#vie">la vie d'une voix</a>).</td></tr>
+    <tr><td>5</td><td><b>Dérive</b></td><td>0 à 100 %</td><td>Une modulation lente et organique, jamais périodique.</td></tr>
+    <tr><td>6</td><td><b>Ton</b></td><td>−100 à +100</td><td>Plus sombre ou plus clair.</td></tr>
+    <tr><td>7</td><td><b>Saturation</b></td><td>0 à 100 %</td><td></td></tr>
+  </table></div>
+
+  <h3 id="p-espace">Espace : où la voix se place</h3>
+  <div class="tablewrap"><table>
+    <tr><th>Knob</th><th>Réglage</th><th>Valeurs</th><th>Ce qu'il fait</th></tr>
+    <tr><td>1</td><td><b>Pan</b></td><td>L100 à R100</td><td>La place de la voix dans le champ stéréo.</td></tr>
+    <tr><td>2</td><td><b>Largeur</b></td><td>0 à 100 %</td><td>La largeur de son image.</td></tr>
+    <tr><td>3</td><td><b>Envoi pool</b></td><td>0 à 100 %</td><td>Ce que la voix envoie dans l'Echo Pool, un écho partagé par toutes les voix.</td></tr>
+    <tr><td>5 · 6</td><td><b>Pool temps · Pool retour</b></td><td>80 ms à 2 s · 0 à 100 %</td><td>Le temps et le retour de l'écho. Communs à tout l'instrument.</td></tr>
+    <tr><td>7</td><td><b>Master</b></td><td>0 à 100 %</td><td>Le niveau général.</td></tr>
+    <tr><td>8</td><td><b>Volume</b></td><td>0 à 100 %</td><td>Le niveau de la voix, comme sur la page Lieu.</td></tr>
+  </table></div>
+</section>
+
+<section id="ecran">
+  <div class="eyebrow">L'écran</div>
+  <h2>Trois vues, à la molette</h2>
+  <div class="screenbox">
+    <div class="tabs" id="tabs"><button data-v="0" class="on">Voix</button><button data-v="1">Carte</button><button data-v="2">Crédits</button></div>
+    <svg class="screen" id="screen" viewBox="0 0 128 64" aria-label="L'écran du Move"></svg>
+    <div class="caption" id="screencap"></div>
+  </div>
+  <div class="grid g3">
+    <div class="card t"><h3>En haut</h3><p>Le numéro et le lieu de la voix choisie, puis l'état du réseau. Dessous, une bande de 16 cellules : pleine, la voix joue ; soulignée, elle a de la matière ; un point qui clignote, elle fouille.</p></div>
+    <div class="card t"><h3>Voix</h3><p>La forme d'onde du fragment et la tête de lecture, puis sa fiche courte : le titre, l'auteur, la licence.</p></div>
+    <div class="card t"><h3>Carte et Crédits</h3><p>Les lieux de Montréal en points, la voix choisie encadrée. Les crédits donnent en entier ce qui joue : lieu, source, titre, auteur, licence, durée.</p></div>
+  </div>
+  <p class="caption" style="margin:0 auto;text-align:left">L'écran ci-dessus est une reconstitution. Le fragment, le titre et l'auteur montrés en exemple sont inventés pour l'illustration.</p>
+</section>
+
+<section id="vie">
+  <div class="eyebrow">La vie d'une voix</div>
+  <h2>Elle arrive, elle joue, elle s'use</h2>
+  <div class="cycle">
+    <div class="s"><b>Vide</b><small>rien encore</small></div><span class="ar">→</span>
+    <div class="s"><b>Fouille</b><small>la récolte cherche</small></div><span class="ar">→</span>
+    <div class="s"><b>Prête</b><small>un fragment attend</small></div><span class="ar">→</span>
+    <div class="s"><b>Joue</b></div><span class="ar">→</span>
+    <div class="s"><b>Figée</b><small>plus jamais remplacée</small></div><span class="ar">→</span>
+    <div class="s"><b>Usée</b><small>un souffle</small></div>
+  </div>
+  <p class="lede">Chaque passage use un peu la voix : elle perd ses aigus, son niveau, elle se met à craquer. Une nouvelle récolte la rend neuve. Une voix figée s'use sans jamais être remplacée : elle finit en souffle.</p>
+  <div class="grid g2">
+    <div class="card k"><h3>La mémoire <span class="etat venir">à venir</span></h3><p>Les fragments captés seront gardés sur le Move avec leur fiche. Sans wifi, sur une scène, l'instrument jouera ce qu'il a déjà récolté. La mémoire d'un lieu devient son archive personnelle.</p></div>
+    <div class="card k"><h3>Sans réseau, aujourd'hui</h3><p>Quand rien n'arrive, une voix joue une texture de synthèse en attendant. La mémoire la remplacera.</p></div>
+  </div>
+</section>
+
+<section id="installer">
+  <div class="eyebrow">Installer</div>
+  <h2>Avant la première version</h2>
+  <p class="lede">Fouille n'est pas encore publié dans le Schwung Manager. Quand il le sera, cette section donnera le lien et les étapes. Ce qu'il faudra :</p>
+  <div class="grid g3">
+    <div class="card"><h3>Un Move avec Schwung</h3><p>Fouille est un module Overtake : il s'installe dans <code>modules/overtake/fouille/</code>.</p></div>
+    <div class="card"><h3>Le wifi</h3><p>Le Move doit être en ligne pour fouiller. Tout le réseau passe en arrière-plan, jamais dans le fil audio.</p></div>
+    <div class="card"><h3>Une clé Freesound</h3><p>Facultative. Demandez-la sur <a href="https://freesound.org/apiv2/apply">freesound.org</a> et collez-la dans <code>UserLibrary/Fouille/freesound.key</code>. Sans clé, Fouille cherche sur Radio Aporee seulement.</p></div>
+  </div>
+</section>
+
+<section id="route">
+  <div class="eyebrow">Feuille de route</div>
+  <h2>Où en est le chantier</h2>
+  <div class="tablewrap"><table>
+    <tr><th>Étape</th><th>Contenu</th><th>État</th></tr>
+    <tr><td><b>0</b></td><td>Sonder le Move : curl, HTTPS, Aporee, Freesound par GPS, décodage MP3</td><td><span class="etat fait">fait</span></td></tr>
+    <tr><td><b>1</b></td><td>La conception (v3)</td><td><span class="etat fait">fait</span></td></tr>
+    <tr><td><b>2</b></td><td>Un moteur portable et l'hôte Overtake : 16 voix, pads de gauche, pages, écran</td><td><span class="etat cours">en cours</span></td></tr>
+    <tr><td><b>3</b></td><td>L'atlas : un fichier de lieux relu à chaud, Montréal en détail, Freesound par GPS, Aporee</td><td><span class="etat cours">en cours</span></td></tr>
+    <tr><td><b>4</b></td><td>Ce site : la carte publique, puis la version servie par le Move</td><td><span class="etat cours">en cours</span></td></tr>
+    <tr><td><b>5</b></td><td>Les ondes : radios en direct, capter, écouter, syntoniser</td><td><span class="etat venir">à venir</span></td></tr>
+    <tr><td><b>6</b></td><td>La mémoire et les crédits sur disque, Ici, les gestes de droite</td><td><span class="etat venir">à venir</span></td></tr>
+    <tr><td><b>7</b></td><td>Saguenay, Kamouraska, la carte libre, les cartes sonores du Québec</td><td><span class="etat venir">à venir</span></td></tr>
+  </table></div>
+  <p class="note"><b>Et après le Move.</b> Fouille pourra tourner sur Pandore, à côté de Phasma, Res et Essaim : une boîte de l'œuvre démarrera en Fouille et fera entendre ce que l'internet connaît des environs de la salle.</p>
+</section>
+
+<section id="egards">
+  <div class="eyebrow">Droits et égards</div>
+  <h2>Des voix qui ont des auteurs</h2>
+  <div class="grid g3">
+    <div class="card"><h3>Les fragments</h3><p>Les enregistrements de Radio Aporee et de Freesound gardent leur fiche et leur licence Creative Commons. L'écran Crédits les montre. Publier une pièce faite avec eux demande de respecter ces licences.</p></div>
+    <div class="card"><h3>Les radios</h3><p>Jouées en direct comme matière. Ce site ne diffusera jamais d'enregistrement de radio : il donnera seulement le lien de la station.</p></div>
+    <div class="card"><h3>Les gens</h3><p>Ce sont des voix publiques, déposées ou émises volontairement. Mais ce sont des voix. Fouille les montre avec leur nom ; il ne les rend pas anonymes.</p></div>
+  </div>
+</section>
+
+<section id="credits">
+  <div class="eyebrow">Filiation et crédits</div>
+  <h2>D'où vient Fouille</h2>
+  <p class="lede">Fouille descend directement du travail d'<b>Emiliano Pennisi</b> (Avenir) : <a href="https://github.com/aveniridm/envion">Envion</a> (le son trouvé sur le réseau, le geste de désauteuriser), <a href="https://www.peamarte.it/endogen/main.html">Endogen</a> (la dynamique du vactrol, le lowercase, la navigation dans un corpus) et <a href="https://www.peamarte.it/interfera/interfera_landing.html">Interfera</a> (la récolte géosonique, Internet Archive, le Spectral Lock, l'érosion). Aucun code n'en est repris ; la filiation est d'idées, et elle est reconnue.</p>
+  <div class="tablewrap"><table>
+    <tr><th>Quoi</th><th>Merci à</th></tr>
+    <tr><td><b>Enregistrements de terrain</b></td><td><a href="https://aporee.org/maps/">Radio Aporee</a> et ses contributeurs, archivé par <a href="https://archive.org/details/radio-aporee-maps">Internet Archive</a></td></tr>
+    <tr><td><b>Sons géolocalisés</b></td><td><a href="https://freesound.org">Freesound</a> et ses contributeurs</td></tr>
+    <tr><td><b>Annuaire des radios</b></td><td><a href="https://www.radio-browser.info">radio-browser.info</a></td></tr>
+    <tr><td><b>Décodage MP3</b></td><td>minimp3, de lieff (CC0)</td></tr>
+    <tr><td><b>Le Move ouvert</b></td><td><a href="https://github.com/charlesvestal/schwung">Schwung</a>, de Charles Vestal</td></tr>
+  </table></div>
+  <footer>Fouille · Vincent Fillion (Filliformes) · code sous licence MIT · <a href="https://github.com/filliformes/fouille-move">github.com/filliformes/fouille-move</a></footer>
+</section>
+
+</main>
+</div>
+
+<script>
+/* L'atlas de départ du module (engine/fe_atlas.c) : centres approximatifs (± 300 m).
+   Le pad i joue le lieu i. Les noms courts sont ceux de l'écran du Move. */
+const PLACES = [
+  {n:"Plateau-Mont-Royal", s:"Plateau", lat:45.5225, lon:-73.5800, km:1.4},
+  {n:"Mile End", s:"Mile End", lat:45.5245, lon:-73.5990, km:0.9},
+  {n:"Saint-Henri", s:"St-Henri", lat:45.4780, lon:-73.5850, km:1.2},
+  {n:"Hochelaga", s:"Hochelaga", lat:45.5446, lon:-73.5436, km:1.5},
+  {n:"Vieux-Montréal", s:"Vieux-Mtl", lat:45.5075, lon:-73.5544, km:0.9, ly:-5},
+  {n:"Centre-ville", s:"Centre-ville", lat:45.5017, lon:-73.5673, km:1.2},
+  {n:"Verdun", s:"Verdun", lat:45.4590, lon:-73.5700, km:1.8},
+  {n:"Petite-Patrie", s:"Pte-Patrie", lat:45.5330, lon:-73.5980, km:1.4},
+  {n:"Notre-Dame-de-Grâce", s:"NDG", lat:45.4720, lon:-73.6150, km:1.8},
+  {n:"Villeray", s:"Villeray", lat:45.5480, lon:-73.6220, km:1.4},
+  {n:"Griffintown", s:"Griffintown", lat:45.4920, lon:-73.5600, km:0.9},
+  {n:"Outremont", s:"Outremont", lat:45.5160, lon:-73.6080, km:1.2},
+  {n:"Parc-Extension", s:"Parc-Ex", lat:45.5300, lon:-73.6300, km:1.0},
+  {n:"Mont-Royal", s:"Mont-Royal", lat:45.5050, lon:-73.5880, km:1.2, ly:6},
+  {n:"Canal de Lachine", s:"Canal Lachine", lat:45.4560, lon:-73.6100, km:2.5},
+  {n:"Ahuntsic", s:"Ahuntsic", lat:45.5560, lon:-73.6600, km:2.0},
+];
+const FAR = [
+  {n:"Montréal", lat:45.5089, lon:-73.5617},
+  {n:"Québec", lat:46.8139, lon:-71.2080},
+  {n:"Saguenay", lat:48.4280, lon:-71.0680},
+  {n:"Kamouraska", lat:47.5640, lon:-69.8670},
+];
+const NS = "http://www.w3.org/2000/svg";
+function el(tag, attrs, parent){ const e = document.createElementNS(NS, tag); for (const k in attrs) e.setAttribute(k, attrs[k]); if (parent) parent.appendChild(e); return e; }
+
+/* projection équirectangulaire, corrigée par cos(latitude) */
+const BOX = {la0:45.435, la1:45.575, lo0:-73.69, lo1:-73.525};
+const KX = Math.cos(45.5 * Math.PI / 180) * 111.32, KY = 111.32;   /* km par degré */
+const MW = 560, kmW = (BOX.lo1 - BOX.lo0) * KX, kmH = (BOX.la1 - BOX.la0) * KY;
+const PX = MW / kmW, MH = Math.round(kmH * PX);
+const map = document.getElementById('map');
+map.setAttribute('viewBox', `0 0 ${MW} ${MH}`);
+function proj(lat, lon){ return [(lon - BOX.lo0) * KX * PX, (BOX.la1 - lat) * KY * PX]; }
+
+/* trame : un trait par kilomètre */
+const grid = el('g', {stroke:'#1d1b17', 'stroke-width':1}, map);
+for (let x = 0; x <= MW; x += PX) el('line', {x1:x, y1:0, x2:x, y2:MH}, grid);
+for (let y = 0; y <= MH; y += PX) el('line', {x1:0, y1:y, x2:MW, y2:y}, grid);
+const scale = el('g', {}, map);
+el('line', {x1:MW-20-2*PX, y1:MH-18, x2:MW-20, y2:MH-18, stroke:'#6d665a', 'stroke-width':2}, scale);
+el('text', {x:MW-20-PX, y:MH-24, 'text-anchor':'middle', fill:'#6d665a', 'font-size':10, 'font-family':'ui-monospace,monospace'}, scale).textContent = '2 km';
+el('text', {x:MW-20, y:16, 'text-anchor':'end', fill:'#6d665a', 'font-size':10, 'font-family':'ui-monospace,monospace'}, scale).textContent = 'N ↑';
+
+const halos = el('g', {}, map), dots = el('g', {}, map);
+const placeEls = PLACES.map((p, i) => {
+  const [x, y] = proj(p.lat, p.lon);
+  const g = el('g', {class:'place', tabindex:0, role:'button', 'aria-label':`Voix ${i+1} : ${p.n}`}, dots);
+  const h = el('circle', {class:'halo', cx:x, cy:y, r:p.km * PX}, halos);
+  el('circle', {class:'dot', cx:x, cy:y, r:4}, g);
+  el('circle', {cx:x, cy:y, r:12, fill:'transparent'}, g);
+  const right = x < MW - 110;
+  const t = el('text', {x: right ? x + 8 : x - 8, y: y + 4 + (p.ly || 0), 'text-anchor': right ? 'start' : 'end'}, g);
+  t.textContent = `${i+1} · ${p.n}`;
+  g.addEventListener('click', () => select(i));
+  g.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); select(i); } });
+  return {g, h};
+});
+
+/* les pads : rangée du bas = voix 1 à 4 */
+const pads = document.getElementById('pads');
+const padEls = [];
+for (let row = 3; row >= 0; row--) for (let c = 0; c < 4; c++) {
+  const i = row * 4 + c, b = document.createElement('button');
+  b.className = 'pad'; b.type = 'button';
+  b.innerHTML = `${i+1}<span>${PLACES[i].s}</span>`;
+  b.setAttribute('aria-label', `Pad ${i+1} : ${PLACES[i].n}`);
+  b.addEventListener('click', () => select(i));
+  pads.appendChild(b); padEls[i] = b;
+}
+
+let sel = 0;
+function fmtKm(km){ return km < 1 ? `${Math.round(km*1000)} m` : `${String(km).replace('.', ',')} km`; }
+function select(i){
+  sel = i;
+  placeEls.forEach((p, j) => { p.g.classList.toggle('on', j === i); p.h.classList.toggle('on', j === i); });
+  padEls.forEach((b, j) => b.classList.toggle('on', j === i));
+  /* le halo choisi passe devant */
+  const h = placeEls[i].h; h.parentNode.appendChild(h);
+  const p = PLACES[i];
+  const lat = p.lat.toFixed(4), lon = p.lon.toFixed(4);
+  document.getElementById('fiche').innerHTML =
+    `<h3>Voix ${i+1} · ${p.n}</h3>
+     <div class="meta">${lat.replace('.', ',')} N · ${(-p.lon).toFixed(4).replace('.', ',')} O · rayon ${fmtKm(p.km)}</div>
+     <p>La voix ${i+1} cherche ce qui a été enregistré dans ce rayon, sur Radio Aporee et Freesound. Sur l'écran du Move, ce lieu s'appelle <b>${p.s}</b>.</p>
+     <div class="links">
+       <a href="https://www.openstreetmap.org/?mlat=${lat}&mlon=${lon}#map=15/${lat}/${lon}" target="_blank" rel="noopener">Voir sur OpenStreetMap</a>
+       <a href="https://freesound.org/browse/geotags/?c_lat=${lat}&c_lon=${lon}&z=15" target="_blank" rel="noopener">Sons Freesound autour</a>
+     </div>`;
+  drawScreen();
+}
+
+/* le Québec : quatre lieux */
+(function(){
+  const qc = document.getElementById('qc');
+  const B = {la0:45.0, la1:49.0, lo0:-74.6, lo1:-69.0};
+  const W = 560, kx = Math.cos(47 * Math.PI/180), sx = W / ((B.lo1 - B.lo0) * kx), H = Math.round((B.la1 - B.la0) * sx);
+  qc.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  const pq = (lat, lon) => [(lon - B.lo0) * kx * sx, (B.la1 - lat) * sx];
+  const g = el('g', {stroke:'#1d1b17'}, qc);
+  for (let lo = -74; lo <= -69; lo++) { const [x] = pq(46, lo); el('line', {x1:x, y1:0, x2:x, y2:H}, g); }
+  for (let la = 45; la <= 49; la++) { const [, y] = pq(la, -70); el('line', {x1:0, y1:y, x2:W, y2:y}, g); }
+  const pts = FAR.map(p => pq(p.lat, p.lon));
+  el('polyline', {points: [pts[0], pts[1], pts[3], pts[2]].map(p => p.join(',')).join(' '), fill:'none', stroke:'#a3c48e', 'stroke-opacity':.35, 'stroke-dasharray':'3 5'}, qc);
+  FAR.forEach((p, i) => {
+    const [x, y] = pts[i];
+    el('circle', {cx:x, cy:y, r: i === 0 ? 6 : 4, fill: i === 0 ? '#d9824b' : '#a3c48e'}, qc);
+    const t = el('text', {x:x + 9, y:y + 4, fill:'#efe9df', 'font-size':13, 'font-family':'system-ui,sans-serif'}, qc);
+    t.textContent = p.n;
+  });
+  el('text', {x:10, y:H - 10, fill:'#6d665a', 'font-size':10, 'font-family':'ui-monospace,monospace'}, qc).textContent = 'une ligne par degré · le pointillé : un itinéraire possible';
+})();
+
+/* l'écran du Move (128 × 64), d'après ui.js */
+let view = 0;
+const CAPS = [
+  "Vue Voix : la forme d'onde et la tête de lecture, puis la fiche du fragment.",
+  "Vue Carte : les lieux de Montréal, la voix choisie encadrée, son nom en bas.",
+  "Vue Crédits : tout ce qu'on sait du fragment qui joue.",
+];
+const scr = document.getElementById('screen');
+function px(x, y, w, h){ el('rect', {x, y, width:w, height:h, fill:'#fff'}, scr); }
+function box(x, y, w, h){ el('rect', {x:x+.5, y:y+.5, width:w-1, height:h-1, fill:'none', stroke:'#fff', 'stroke-width':1}, scr); }
+function txt(x, y, s){ const t = el('text', {x, y: y + 7}, scr); t.textContent = s; }
+const DEMO_STATE = [3,2,0,3,2,0,0,2,0,0,0,2,0,0,0,0];   /* exemple : quelques voix jouent, d'autres ont de la matière */
+function drawScreen(){
+  while (scr.firstChild) scr.removeChild(scr.firstChild);
+  const p = PLACES[sel];
+  txt(0, 0, `${sel+1} ${p.s}`.slice(0, 12));
+  txt(128 - 6*6, 0, 'wifi 1');
+  for (let i = 0; i < 16; i++) {
+    const x = i * 8, s = i === sel ? 3 : DEMO_STATE[i];
+    if (s === 3) px(x + 1, 10, 6, 3); else if (s === 2) px(x + 1, 12, 6, 1);
+    if (i === sel) box(x, 10, 8, 4);
+  }
+  if (view === 0) {
+    const y0 = 16, h = 22, mid = y0 + h/2;
+    let seed = sel * 97 + 13;
+    const rnd = () => (seed = (seed * 16807) % 2147483647) / 2147483647;
+    for (let i = 0; i < 64; i++) {
+      const env = Math.sin(Math.PI * (i + 1) / 66) * .7 + .3;
+      const a = Math.max(1, Math.round((.25 + .75 * rnd()) * env * h / 2));
+      px(i * 2, Math.round(mid - a), 1, a * 2);
+    }
+    px(46, y0 - 1, 1, h + 2);
+    txt(0, 42, `Ruelle, ${p.s}`.slice(0, 21));
+    txt(0, 52, 'auteur CC BY 4.0');
+  } else if (view === 1) {
+    const la0 = 45.44, la1 = 45.57, lo0 = -73.69, lo1 = -73.53, y0 = 14, h = 40;
+    box(0, y0 - 1, 128, h + 2);
+    PLACES.forEach((q, i) => {
+      const x = Math.round((q.lon - lo0) / (lo1 - lo0) * (128 - 4)) + 2;
+      const y = Math.round((la1 - q.lat) / (la1 - la0) * (h - 4)) + y0 + 2;
+      if (i === sel) { box(x - 3, y - 3, 7, 7); px(x - 1, y - 1, 3, 3); }
+      else if (DEMO_STATE[i] === 3) px(x - 1, y - 1, 3, 3);
+      else px(x, y, 1, 1);
+    });
+    txt(0, 56, p.s);
+  } else {
+    txt(0, 12, `${p.s} - Aporee`.slice(0, 21));
+    txt(0, 22, 'Ruelle, fin de');
+    txt(0, 32, 'journée');
+    txt(0, 42, 'auteur');
+    txt(0, 52, 'CC BY 4.0 30s');
+  }
+  document.getElementById('screencap').textContent = CAPS[view];
+}
+document.querySelectorAll('#tabs button').forEach(b => b.addEventListener('click', () => {
+  view = +b.dataset.v;
+  document.querySelectorAll('#tabs button').forEach(c => c.classList.toggle('on', c === b));
+  drawScreen();
+}));
+select(0);
+</script>
+</body>
+</html>
