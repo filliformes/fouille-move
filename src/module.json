@@ -12,8 +12,8 @@
   "raw_midi": true,
 
   "defaults": {
-    "terrain": 0.0, "depth": 0.5, "rise": 0.1, "hold": 0.5,
-    "fall": 0.3, "strike": 0.3, "lock": 0.0, "erode": 0.0,
+    "terrain": 0.0, "length": 1.0, "rise": 0.1,
+    "hold": 0.0, "fall": 0.3, "lock": 0.0, "erode": 0.0,
     "flow": 0.15, "scatter": 0.5, "stretch": 0.5, "grain": 0.2,
     "drift": 0.3, "pool": 0.0, "spread": 0.7, "volume": 0.6,
     "mode": 0.0, "city": 0.0, "hood": 0.0
@@ -29,7 +29,7 @@
       "levels": {
         "root": {
           "name": "Fouille",
-          "knobs": ["terrain", "depth", "rise", "hold", "fall", "strike", "lock", "erode"],
+          "knobs": ["terrain", "flow", "length", "rise", "hold", "fall", "lock", "erode"],
           "params": [
             {"level": "Excavation", "label": "Excavation"},
             {"level": "Currents", "label": "Currents"},
@@ -38,18 +38,18 @@
         },
         "Excavation": {
           "label": "Excavation",
-          "knobs": ["terrain", "depth", "rise", "hold", "fall", "strike", "lock", "erode"],
-          "params": ["terrain", "depth", "rise", "hold", "fall", "strike", "lock", "erode"]
+          "knobs": ["terrain", "flow", "length", "rise", "hold", "fall", "lock", "erode"],
+          "params": ["terrain", "flow", "length", "rise", "hold", "fall", "lock", "erode"]
         },
         "Currents": {
           "label": "Currents",
-          "knobs": ["flow", "scatter", "stretch", "grain", "drift", "pool", "spread", "volume"],
-          "params": ["flow", "scatter", "stretch", "grain", "drift", "pool", "spread", "volume"]
+          "knobs": ["scatter", "stretch", "grain", "drift", "erode", "pool", "spread", "volume"],
+          "params": ["scatter", "stretch", "grain", "drift", "erode", "pool", "spread", "volume"]
         },
         "Location": {
           "label": "Location",
-          "knobs": ["mode", "city", "hood", "rise", "hold", "fall", "flow", "volume"],
-          "params": ["mode", "city", "hood", "rise", "hold", "fall", "flow", "volume"]
+          "knobs": ["mode", "city", "hood", "rise", "hold", "fall", "flow", "length"],
+          "params": ["mode", "city", "hood", "rise", "hold", "fall", "flow", "length"]
         }
       }
     }

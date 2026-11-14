@@ -30,8 +30,8 @@
 
 #define SAMPLE_RATE     44100.0f
 #define BLOCK_SIZE      128
-#define N_VOICES        8
-#define N_SLOTS         8
+#define N_VOICES        16
+#define N_SLOTS         32
 #define MAX_SLOT_SAMPLES (22050 * 10)  /* 10 seconds at 22050Hz mono */
 #define ECHO_POOL_SIZE  (44100 * 5)    /* 5 seconds stereo */
 
@@ -139,11 +139,14 @@ static inline float drift_process(organic_drift_t *d, float depth) {
 
 /* ── Voice ──────────────────────────────────────────────────────────────── */
 
+/* Crossfade length at loop boundary for click-free looping */
+#define XFADE_SAMPLES 512  /* ~11.6ms at 44.1kHz */
+
 typedef enum {
     ENV_OFF = 0,
-    ENV_RISE,       /* attack */
-    ENV_HOLD,       /* sustain (freeze / drift / granulate) */
-    ENV_FALL        /* decay/release */
+    ENV_RISE,       /* attack — Rise knob controls time */
+    ENV_SUSTAIN,    /* held — loops until note-off */
+    ENV_FALL        /* pad released — Fall knob controls decay time */
 } env_stage_t;
 
 typedef enum {
@@ -160,13 +163,16 @@ typedef struct {
 
     /* Playback */
     float read_pos;             /* fractional sample position into slot buffer */
+    float loop_start;           /* where the loop begins (for crossfade) */
     float play_speed;           /* playback rate (1.0 = normal) */
+    int duration_samples;       /* loop length in samples (slot_len * length) */
+    int samples_played;         /* counter within current loop iteration */
 
-    /* Ternary envelope → feeds vactrol LPG */
+    /* Envelope */
     env_stage_t env_stage;
-    float env_level;            /* 0-1 envelope output */
-    float env_rise_rate;        /* per-sample rise increment */
-    float env_fall_rate;        /* per-sample fall decrement */
+    float env_level;            /* 0-1 */
+    float env_rise_rate;        /* per-sample rise (from Rise param) */
+    float env_fall_rate;        /* per-sample decay (from Fall param) */
 
     /* Vactrol LPG */
     vactrol_lpg_t lpg;
@@ -179,9 +185,8 @@ typedef struct {
     float pan;                  /* -1..1 */
 
     /* Grain state (for HOLD_GRANULATE) */
-    float grain_origin;         /* center of grain loop */
-    float grain_size_samples;   /* size of micro-loop */
-    int grain_counter;          /* samples until next grain jitter */
+    float grain_origin;
+    float grain_size_samples;
 } voice_t;
 
 /* ── Fetch Thread Context ───────────────────────────────────────────────── */
@@ -221,12 +226,12 @@ typedef struct {
     int echo_pool_write;         /* write position */
 
     /* Parameters — Page 1: Excavation */
-    float param_terrain;         /* 0-1 → 8 categories */
+    float param_terrain;         /* 0-1 → 8 categories (enum) */
     float param_depth;           /* 0-1 spectral brightness filter */
-    float param_rise;            /* 0-1 → 0.5ms to 2s */
-    float param_hold;            /* 0-1 → freeze/drift/granulate */
-    float param_fall;            /* 0-1 → 1ms to 5s */
-    float param_strike;          /* 0-1 → vactrol nonlinearity */
+    float param_length;          /* 0-1 → fraction of sound to play (1=full) */
+    float param_rise;            /* 0-1 → envelope attack (0.5ms–2s) */
+    float param_hold;            /* 0-1 → freeze/drift/granulate (enum) */
+    float param_fall;            /* 0-1 → envelope release (1ms–5s) */
     float param_lock;            /* 0-1 → spectral lock Q (0=bypass) */
     float param_erode;           /* 0-1 → erosion rate */
 
@@ -274,16 +279,22 @@ static const char *POETIC_WORDS[] = {
 };
 #define N_POETIC_WORDS (sizeof(POETIC_WORDS) / sizeof(POETIC_WORDS[0]))
 
-static const char *CATEGORY_TERMS[][3] = {
-    /* Nature   */ {"field-recording", "wind", "water"},
-    /* Machines */ {"motor", "industrial", "mechanism"},
-    /* Voices   */ {"speech", "whisper", "choir"},
-    /* Abstract */ {"noise", "texture", "drone"},
-    /* Material */ {"metal", "wood", "glass"},
-    /* Urban    */ {"city", "traffic", "construction"},
-    /* Organic  */ {"body", "liquid", "biological"},
-    /* Cosmic   */ {"radio", "electromagnetic", "signal"}
+static const char *TERRAIN_NAMES[] = {
+    "Nature", "Machine", "Voice", "Abstract", "Material", "Urban", "Organic", "Cosmic"
 };
+#define N_TERRAIN_NAMES 8
+
+static const char *CATEGORY_TERMS[][6] = {
+    /* Nature   */ {"field-recording", "wind", "water", "rain", "forest", "birdsong"},
+    /* Machines */ {"motor", "industrial", "mechanism", "engine", "factory", "machine"},
+    /* Voices   */ {"speech", "whisper", "choir", "vocal", "singing", "chant"},
+    /* Abstract */ {"noise", "texture", "drone", "ambient", "experimental", "glitch"},
+    /* Material */ {"metal", "wood", "glass", "stone", "paper", "ceramic"},
+    /* Urban    */ {"city", "traffic", "construction", "street", "train", "subway"},
+    /* Organic  */ {"body", "liquid", "biological", "breath", "heartbeat", "insect"},
+    /* Cosmic   */ {"radio", "electromagnetic", "signal", "space", "satellite", "shortwave"}
+};
+#define N_CATEGORY_TERMS 6
 
 /* ── Montreal Neighbourhoods (Geosonic Seeder) ─────────────────────────── */
 
@@ -498,7 +509,7 @@ static int fetch_freesound(fetch_context_t *ctx, float *out, int out_capacity) {
     int terrain = atomic_load(&ctx->terrain);
     if (terrain < 0) terrain = 0;
     if (terrain > 7) terrain = 7;
-    int word_idx = xorshift32(&ctx->rng) % 3;
+    int word_idx = xorshift32(&ctx->rng) % N_CATEGORY_TERMS;
     const char *term = CATEGORY_TERMS[terrain][word_idx];
 
     /* Also mix in a poetic word sometimes */
@@ -511,7 +522,7 @@ static int fetch_freesound(fetch_context_t *ctx, float *out, int out_capacity) {
     }
 
     /* Random page offset to get variety */
-    int page = 1 + (xorshift32(&ctx->rng) % 5);
+    int page = 1 + (xorshift32(&ctx->rng) % 10);
 
     char cmd[1024];
     snprintf(cmd, sizeof(cmd),
@@ -590,7 +601,7 @@ static int fetch_internet_archive(fetch_context_t *ctx, float *out, int out_capa
         snprintf(query, sizeof(query),
             "collection:radio-aporee-maps+AND+%s", POETIC_WORDS[pw]);
     } else {
-        int word_idx = xorshift32(&ctx->rng) % 3;
+        int word_idx = xorshift32(&ctx->rng) % N_CATEGORY_TERMS;
         const char *term = CATEGORY_TERMS[terrain][word_idx];
         int pw = xorshift32(&ctx->rng) % N_POETIC_WORDS;
         snprintf(query, sizeof(query),
@@ -869,10 +880,12 @@ static void *fetch_thread_func(void *arg) {
 
     while (atomic_load(&ctx->running)) {
         int flow_sec = atomic_load(&ctx->flow_seconds);
-        if (flow_sec < 5) flow_sec = 5;
+        /* If flow_sec is 0, auto-fetch is disabled — wait indefinitely for fetch_requested */
+        /* Otherwise, wait up to flow_sec seconds before auto-fetching */
+        int wait_time = (flow_sec == 0) ? 3600 : flow_sec;  /* 1 hour if disabled */
 
         /* Sleep in 1-second intervals, checking for shutdown and urgent requests */
-        for (int s = 0; s < flow_sec && atomic_load(&ctx->running); s++) {
+        for (int s = 0; s < wait_time && atomic_load(&ctx->running); s++) {
             sleep(1);
             if (atomic_load(&ctx->fetch_requested)) {
                 atomic_store(&ctx->fetch_requested, 0);
@@ -1031,24 +1044,24 @@ static void *create_instance(const char *module_dir, const char *json_defaults) 
         inst->voices[i].drift_pan.rng = 0xBEEF0000 + i * 6271;
     }
 
-    /* Default parameters — lowercase headroom: volume starts low */
+    /* Default parameters */
     inst->param_terrain  = 0.0f;
     inst->param_depth    = 0.5f;
+    inst->param_length   = 1.0f;    /* full sound duration */
     inst->param_rise     = 0.1f;    /* ~200ms attack */
-    inst->param_hold     = 0.5f;    /* drift mode */
+    inst->param_hold     = 0.0f;    /* freeze mode */
     inst->param_fall     = 0.3f;    /* ~1.5s decay */
-    inst->param_strike   = 0.3f;    /* moderate nonlinearity */
     inst->param_lock     = 0.0f;    /* spectral lock bypassed */
     inst->param_erode    = 0.0f;    /* no erosion */
 
-    inst->param_flow     = 0.15f;   /* ~22s rotation */
+    inst->param_flow     = 0.0f;    /* auto-fetch disabled by default */
     inst->param_scatter  = 0.5f;
     inst->param_stretch  = 0.5f;    /* 1x playback */
     inst->param_grain    = 0.2f;    /* ~40ms grains */
     inst->param_drift    = 0.3f;    /* moderate drift */
     inst->param_pool     = 0.0f;    /* echo pool off */
     inst->param_spread   = 0.7f;    /* wide stereo */
-    inst->param_volume   = 0.6f;    /* moderate default — audible but not hot */
+    inst->param_volume   = 0.6f;    /* moderate default */
 
     inst->rng = 0x12345678;
 
@@ -1075,7 +1088,7 @@ static void *create_instance(const char *module_dir, const char *json_defaults) 
     inst->fetch.rng = 0xFE7C0000;
     inst->fetch.next_slot = 0;
     atomic_store(&inst->fetch.running, 1);
-    atomic_store(&inst->fetch.fetch_requested, 0);
+    atomic_store(&inst->fetch.fetch_requested, 1);  /* Trigger immediate fetch on startup */
     atomic_store(&inst->fetch.terrain, 0);
     atomic_store(&inst->fetch.depth_pct, 50);
     atomic_store(&inst->fetch.flow_seconds, 20);
@@ -1124,7 +1137,7 @@ static void on_midi(void *instance, const uint8_t *msg, int len, int source) {
         float target_centroid = clampf((float)(note - 36) / 48.0f, 0.0f, 1.0f);
         float target_loudness = vel / 127.0f;
         int slot = corpus_find_nearest_slot(inst, target_centroid, target_loudness);
-        if (slot < 0) return;  /* no material available yet */
+        if (slot < 0) return;
 
         v->active = 1;
         v->note = note;
@@ -1137,15 +1150,20 @@ static void on_midi(void *instance, const uint8_t *msg, int len, int source) {
         float stretch_exp = powf(2.0f, (inst->param_stretch - 0.5f) * 4.0f);
         v->play_speed = stretch_exp;
 
-        /* Slice position: note pitch maps into the sound + velocity scatter */
+        /* Duration: each sound's natural length scaled by Length knob */
         int slot_len = inst->slots[slot].length;
         if (slot_len < 1) slot_len = 1;
-        float base_pos = target_centroid;  /* pitch maps to position in the sound */
-        float scatter = inst->param_scatter * v->velocity * (randf(&inst->rng) - 0.5f) * 2.0f;
-        float start_frac = clampf(base_pos + scatter * 0.3f, 0.0f, 0.95f);
-        v->read_pos = start_frac * (float)slot_len;
+        float length_frac = 0.01f + inst->param_length * 0.99f; /* 1%–100% */
+        v->duration_samples = (int)((float)slot_len * length_frac);
+        if (v->duration_samples < 64) v->duration_samples = 64;
+        v->samples_played = 0;
 
-        /* Ternary envelope: compute rates from params */
+        /* Random start position — Scatter controls range (0–30% max) */
+        float start_frac = randf(&inst->rng) * inst->param_scatter * 0.3f;
+        v->read_pos = start_frac * (float)slot_len;
+        v->loop_start = v->read_pos;
+
+        /* Envelope: Rise → Sustain (loops), Fall on note-off */
         float rise_time = 0.0005f + inst->param_rise * 1.9995f;   /* 0.5ms → 2s */
         float fall_time = 0.001f + inst->param_fall * 4.999f;     /* 1ms → 5s */
         v->env_rise_rate = 1.0f / (rise_time * SAMPLE_RATE);
@@ -1156,15 +1174,14 @@ static void on_midi(void *instance, const uint8_t *msg, int len, int source) {
         /* Reset LPG */
         vactrol_reset(&v->lpg);
 
-        /* Pan: note pitch maps to stereo field + spread */
-        float base_pan = target_centroid * 2.0f - 1.0f;
+        /* Pan: random stereo placement scaled by spread */
+        float base_pan = (randf(&inst->rng) - 0.5f) * 2.0f;
         v->pan = base_pan * inst->param_spread;
 
         /* Grain state for HOLD_GRANULATE */
         v->grain_origin = v->read_pos;
         float grain_ms = 1.0f + inst->param_grain * 199.0f;
         v->grain_size_samples = grain_ms * 0.001f * SAMPLE_RATE;
-        v->grain_counter = (int)v->grain_size_samples;
 
         /* Trigger urgent fetch on hard velocity */
         if (vel > 100) {
@@ -1188,21 +1205,21 @@ typedef struct { const char *key; const char *label; float min, max, step; } kno
 
 static const knob_def_t PAGE_EXCAVATION[8] = {
     {"terrain", "Terrain",  0, 1, 0.01f},
-    {"depth",   "Depth",    0, 1, 0.01f},
+    {"flow",    "Flow",     0, 1, 0.01f},
+    {"length",  "Length",   0, 1, 0.01f},
     {"rise",    "Rise",     0, 1, 0.01f},
     {"hold",    "Hold",     0, 1, 0.01f},
     {"fall",    "Fall",     0, 1, 0.01f},
-    {"strike",  "Strike",   0, 1, 0.01f},
     {"lock",    "Lock",     0, 1, 0.01f},
     {"erode",   "Erode",    0, 1, 0.01f},
 };
 
 static const knob_def_t PAGE_CURRENTS[8] = {
-    {"flow",    "Flow",     0, 1, 0.01f},
     {"scatter", "Scatter",  0, 1, 0.01f},
     {"stretch", "Stretch",  0, 1, 0.01f},
     {"grain",   "Grain",    0, 1, 0.01f},
     {"drift",   "Drift",    0, 1, 0.01f},
+    {"erode",   "Erode",    0, 1, 0.01f},
     {"pool",    "Pool",     0, 1, 0.01f},
     {"spread",  "Spread",   0, 1, 0.01f},
     {"volume",  "Volume",   0, 1, 0.01f},
@@ -1216,16 +1233,15 @@ static const knob_def_t PAGE_LOCATION[8] = {
     {"hold",    "Hold",     0, 1, 0.01f},
     {"fall",    "Fall",     0, 1, 0.01f},
     {"flow",    "Flow",     0, 1, 0.01f},
-    {"volume",  "Volume",   0, 1, 0.01f},
+    {"length",  "Length",   0, 1, 0.01f},
 };
 
 static float *get_param_ptr(fouille_instance_t *inst, const char *key) {
-    if (strcmp(key, "terrain")  == 0) return &inst->param_terrain;
+    /* terrain is enum — handled separately */
     if (strcmp(key, "depth")    == 0) return &inst->param_depth;
+    if (strcmp(key, "length")   == 0) return &inst->param_length;
     if (strcmp(key, "rise")     == 0) return &inst->param_rise;
-    if (strcmp(key, "hold")     == 0) return &inst->param_hold;
     if (strcmp(key, "fall")     == 0) return &inst->param_fall;
-    if (strcmp(key, "strike")   == 0) return &inst->param_strike;
     if (strcmp(key, "lock")     == 0) return &inst->param_lock;
     if (strcmp(key, "erode")    == 0) return &inst->param_erode;
     if (strcmp(key, "flow")     == 0) return &inst->param_flow;
@@ -1258,14 +1274,23 @@ static void set_param(void *instance, const char *key, const char *val) {
             const knob_def_t *page = get_active_page(inst, NULL);
             float *p = get_param_ptr(inst, page[idx].key);
             if (p) {
-                int delta = atoi(val);
+                float delta = atof(val);
                 *p = clampf(*p + delta * page[idx].step, page[idx].min, page[idx].max);
             }
         }
         return;
     }
 
-    /* Page navigation */
+    /* Page navigation — Schwung sends _level with page name */
+    if (strcmp(key, "_level") == 0) {
+        if (strcmp(val, "Excavation") == 0 || strcmp(val, "Fouille") == 0)
+            inst->current_page = 0;
+        else if (strcmp(val, "Currents") == 0)
+            inst->current_page = 1;
+        else if (strcmp(val, "Location") == 0)
+            inst->current_page = 2;
+        return;
+    }
     if (strcmp(key, "page") == 0) {
         int pg = atoi(val);
         inst->current_page = (pg >= 0 && pg <= 2) ? pg : 0;
@@ -1276,14 +1301,31 @@ static void set_param(void *instance, const char *key, const char *val) {
     if (strcmp(key, "state") == 0) {
         sscanf(val, "%f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f %f",
                &inst->param_terrain, &inst->param_depth,
-               &inst->param_rise, &inst->param_hold,
-               &inst->param_fall, &inst->param_strike,
+               &inst->param_length, &inst->param_rise,
+               &inst->param_hold, &inst->param_fall,
                &inst->param_lock, &inst->param_erode,
                &inst->param_flow, &inst->param_scatter,
                &inst->param_stretch, &inst->param_grain,
                &inst->param_drift, &inst->param_pool,
                &inst->param_spread, &inst->param_volume,
                &inst->param_mode, &inst->param_hood);
+    } else if (strcmp(key, "terrain") == 0) {
+        /* Enum: match terrain name to index, or accept float fallback */
+        int matched = 0;
+        for (int i = 0; i < N_TERRAIN_NAMES; i++) {
+            if (strcmp(val, TERRAIN_NAMES[i]) == 0) {
+                inst->param_terrain = (float)i / (float)(N_TERRAIN_NAMES - 1);
+                matched = 1;
+                break;
+            }
+        }
+        if (!matched) inst->param_terrain = clampf(atof(val), 0.0f, 1.0f);
+    } else if (strcmp(key, "hold") == 0) {
+        /* Enum: Freeze/Drift/Grain, or float fallback */
+        if (strcmp(val, "Freeze") == 0) inst->param_hold = 0.0f;
+        else if (strcmp(val, "Drift") == 0) inst->param_hold = 0.5f;
+        else if (strcmp(val, "Grain") == 0) inst->param_hold = 1.0f;
+        else inst->param_hold = clampf(atof(val), 0.0f, 1.0f);
     } else if (strcmp(key, "mode") == 0) {
         /* Enum: "Fouille" → 0, "Cities" → 1 */
         if (strcmp(val, "Cities") == 0) inst->param_mode = 1.0f;
@@ -1308,18 +1350,21 @@ static void set_param(void *instance, const char *key, const char *val) {
     }
 
     /* Sync fetch thread params */
-    atomic_store(&inst->fetch.terrain, (int)(inst->param_terrain * 7.99f));
-    atomic_store(&inst->fetch.depth_pct, (int)(inst->param_depth * 100.0f));
-    atomic_store(&inst->fetch.flow_seconds, 5 + (int)(inst->param_flow * 115.0f));
     {
+        int new_terrain = (int)(inst->param_terrain * (float)(N_TERRAIN_NAMES - 1) + 0.5f);
+        int old_terrain = atomic_load(&inst->fetch.terrain);
+        atomic_store(&inst->fetch.terrain, new_terrain);
+        atomic_store(&inst->fetch.depth_pct, (int)(inst->param_depth * 100.0f));
+        /* Flow: 0% = disabled (on-demand only), 1-100% = 1-120s auto-fetch */
+        atomic_store(&inst->fetch.flow_seconds, (int)(inst->param_flow * 120.0f));
         int new_mode = (inst->param_mode >= 0.5f) ? 1 : 0;
         int old_mode = atomic_load(&inst->fetch.mode);
         atomic_store(&inst->fetch.mode, new_mode);
         int new_hood = (int)(inst->param_hood * (float)(N_MONTREAL_HOODS - 1) + 0.5f);
         int old_hood = atomic_load(&inst->fetch.neighbourhood);
         atomic_store(&inst->fetch.neighbourhood, new_hood);
-        /* Force immediate fetch when mode or neighbourhood changes */
-        if (new_mode != old_mode || new_hood != old_hood) {
+        /* Force immediate fetch when terrain, mode, or neighbourhood changes */
+        if (new_terrain != old_terrain || new_mode != old_mode || new_hood != old_hood) {
             atomic_store(&inst->fetch.fetch_requested, 1);
         }
     }
@@ -1331,27 +1376,32 @@ static int get_param(void *instance, const char *key, char *buf, int buf_len) {
     /* chain_params — memcpy pattern to avoid truncation */
     if (strcmp(key, "chain_params") == 0) {
         static const char *cp =
-            "["
-            "{\"key\":\"terrain\",\"name\":\"Terrain\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"depth\",\"name\":\"Depth\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"rise\",\"name\":\"Rise\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"hold\",\"name\":\"Hold\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"fall\",\"name\":\"Fall\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"strike\",\"name\":\"Strike\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"lock\",\"name\":\"Lock\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"erode\",\"name\":\"Erode\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"flow\",\"name\":\"Flow\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"scatter\",\"name\":\"Scatter\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"stretch\",\"name\":\"Stretch\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"grain\",\"name\":\"Grain\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"drift\",\"name\":\"Drift\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"pool\",\"name\":\"Pool\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"spread\",\"name\":\"Spread\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"volume\",\"name\":\"Volume\",\"type\":\"float\",\"min\":0,\"max\":1,\"step\":0.01},"
-            "{\"key\":\"mode\",\"name\":\"Mode\",\"type\":\"enum\",\"options\":[\"Fouille\",\"Cities\"]},"
+            "[{\"key\":\"terrain\",\"name\":\"Terrain\",\"type\":\"enum\","
+            "\"options\":[\"Nature\",\"Machine\",\"Voice\",\"Abstract\","
+            "\"Material\",\"Urban\",\"Organic\",\"Cosmic\"]},"
+            "{\"key\":\"hold\",\"name\":\"Hold\",\"type\":\"enum\","
+            "\"options\":[\"Freeze\",\"Drift\",\"Grain\"]},"
+            "{\"key\":\"mode\",\"name\":\"Mode\",\"type\":\"enum\","
+            "\"options\":[\"Fouille\",\"Cities\"]},"
+            "{\"key\":\"length\",\"name\":\"Length\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"rise\",\"name\":\"Rise\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"fall\",\"name\":\"Fall\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"lock\",\"name\":\"Lock\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"erode\",\"name\":\"Erode\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"flow\",\"name\":\"Flow\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"scatter\",\"name\":\"Scatter\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"stretch\",\"name\":\"Stretch\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"grain\",\"name\":\"Grain\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"drift\",\"name\":\"Drift\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"pool\",\"name\":\"Pool\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"spread\",\"name\":\"Spread\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"volume\",\"name\":\"Volume\",\"type\":\"float\",\"min\":0,\"max\":1},"
+            "{\"key\":\"depth\",\"name\":\"Depth\",\"type\":\"float\",\"min\":0,\"max\":1},"
             "{\"key\":\"city\",\"name\":\"City\",\"type\":\"enum\",\"options\":[\"Montreal\"]},"
-            "{\"key\":\"hood\",\"name\":\"Hood\",\"type\":\"enum\",\"options\":[\"Plateau\",\"Mile End\",\"St-Henri\",\"Hochelaga\",\"Vieux-Mtl\",\"Centre-Ville\",\"Verdun\",\"Rosemont\",\"NDG\",\"Villeray\",\"Griffintown\",\"Outremont\",\"Parc Jarry\",\"Mont-Royal\",\"Lachine\",\"Ahuntsic\"]}"
-            "]";
+            "{\"key\":\"hood\",\"name\":\"Neighbourhood\",\"type\":\"enum\",\"options\":"
+            "[\"Plateau\",\"Mile End\",\"St-Henri\",\"Hochelaga\",\"Vieux-Mtl\",\"Centre-Ville\","
+            "\"Verdun\",\"Rosemont\",\"NDG\",\"Villeray\",\"Griffintown\",\"Outremont\","
+            "\"Parc Jarry\",\"Mont-Royal\",\"Lachine\",\"Ahuntsic\"]}]";
         int len = (int)strlen(cp);
         if (len >= buf_len) return -1;
         memcpy(buf, cp, len + 1);
@@ -1363,17 +1413,17 @@ static int get_param(void *instance, const char *key, char *buf, int buf_len) {
         static const char *hier =
             "{\"levels\":{"
             "\"root\":{\"name\":\"Fouille\","
-            "\"knobs\":[\"terrain\",\"depth\",\"rise\",\"hold\",\"fall\",\"strike\",\"lock\",\"erode\"],"
+            "\"knobs\":[\"terrain\",\"flow\",\"length\",\"rise\",\"hold\",\"fall\",\"lock\",\"erode\"],"
             "\"params\":[{\"level\":\"Excavation\",\"label\":\"Excavation\"},{\"level\":\"Currents\",\"label\":\"Currents\"},{\"level\":\"Location\",\"label\":\"Location\"}]},"
             "\"Excavation\":{\"label\":\"Excavation\","
-            "\"knobs\":[\"terrain\",\"depth\",\"rise\",\"hold\",\"fall\",\"strike\",\"lock\",\"erode\"],"
-            "\"params\":[\"terrain\",\"depth\",\"rise\",\"hold\",\"fall\",\"strike\",\"lock\",\"erode\"]},"
+            "\"knobs\":[\"terrain\",\"flow\",\"length\",\"rise\",\"hold\",\"fall\",\"lock\",\"erode\"],"
+            "\"params\":[\"terrain\",\"flow\",\"length\",\"rise\",\"hold\",\"fall\",\"lock\",\"erode\"]},"
             "\"Currents\":{\"label\":\"Currents\","
-            "\"knobs\":[\"flow\",\"scatter\",\"stretch\",\"grain\",\"drift\",\"pool\",\"spread\",\"volume\"],"
-            "\"params\":[\"flow\",\"scatter\",\"stretch\",\"grain\",\"drift\",\"pool\",\"spread\",\"volume\"]},"
+            "\"knobs\":[\"scatter\",\"stretch\",\"grain\",\"drift\",\"erode\",\"pool\",\"spread\",\"volume\"],"
+            "\"params\":[\"scatter\",\"stretch\",\"grain\",\"drift\",\"erode\",\"pool\",\"spread\",\"volume\"]},"
             "\"Location\":{\"label\":\"Location\","
-            "\"knobs\":[\"mode\",\"city\",\"hood\",\"rise\",\"hold\",\"fall\",\"flow\",\"volume\"],"
-            "\"params\":[\"mode\",\"city\",\"hood\",\"rise\",\"hold\",\"fall\",\"flow\",\"volume\"]}"
+            "\"knobs\":[\"mode\",\"city\",\"hood\",\"rise\",\"hold\",\"fall\",\"flow\",\"length\"],"
+            "\"params\":[\"mode\",\"city\",\"hood\",\"rise\",\"hold\",\"fall\",\"flow\",\"length\"]}"
             "}}";
         int len = (int)strlen(hier);
         if (len >= buf_len) return -1;
@@ -1396,37 +1446,33 @@ static int get_param(void *instance, const char *key, char *buf, int buf_len) {
         int idx = atoi(key + 5) - 1;
         if (idx >= 0 && idx < 8) {
             const knob_def_t *page = get_active_page(inst, NULL);
-            float *p = get_param_ptr(inst, page[idx].key);
-            if (p) {
-                /* Special display for Terrain (category name) */
-                if (strcmp(page[idx].key, "terrain") == 0) {
-                    const char *names[] = {"Nature","Machine","Voice","Abstract","Material","Urban","Organic","Cosmic"};
-                    int cat = (int)(*p * 7.99f);
-                    return snprintf(buf, buf_len, "%s", names[cat]);
-                }
-                /* Special display for Hold (mode name) */
-                if (strcmp(page[idx].key, "hold") == 0) {
-                    if (*p < 0.33f) return snprintf(buf, buf_len, "Freeze");
-                    if (*p < 0.66f) return snprintf(buf, buf_len, "Drift");
-                    return snprintf(buf, buf_len, "Grain");
-                }
-                /* Special display for Mode */
-                if (strcmp(page[idx].key, "mode") == 0) {
-                    return snprintf(buf, buf_len, "%s", (*p < 0.5f) ? "Fouille" : "Cities");
-                }
-                /* Special display for City */
-                if (strcmp(page[idx].key, "city") == 0) {
-                    return snprintf(buf, buf_len, "Montreal");
-                }
-                /* Special display for Neighbourhood */
-                if (strcmp(page[idx].key, "hood") == 0) {
-                    int hi = (int)(*p * (float)(N_MONTREAL_HOODS - 1) + 0.5f);
-                    if (hi < 0) hi = 0;
-                    if (hi >= (int)N_MONTREAL_HOODS) hi = (int)N_MONTREAL_HOODS - 1;
-                    return snprintf(buf, buf_len, "%s", MONTREAL_HOODS[hi].name);
-                }
-                return snprintf(buf, buf_len, "%d%%", (int)(*p * 100));
+            const char *pkey = page[idx].key;
+            /* Enum params: return name string */
+            if (strcmp(pkey, "terrain") == 0) {
+                int cat = (int)(inst->param_terrain * (float)(N_TERRAIN_NAMES - 1) + 0.5f);
+                if (cat < 0) cat = 0; if (cat >= N_TERRAIN_NAMES) cat = N_TERRAIN_NAMES - 1;
+                return snprintf(buf, buf_len, "%s", TERRAIN_NAMES[cat]);
             }
+            if (strcmp(pkey, "hold") == 0) {
+                const char *hn[] = {"Freeze","Drift","Grain"};
+                int h = (inst->param_hold < 0.33f) ? 0 : (inst->param_hold < 0.66f) ? 1 : 2;
+                return snprintf(buf, buf_len, "%s", hn[h]);
+            }
+            if (strcmp(pkey, "mode") == 0) {
+                return snprintf(buf, buf_len, "%s", (inst->param_mode < 0.5f) ? "Fouille" : "Cities");
+            }
+            if (strcmp(pkey, "city") == 0) {
+                return snprintf(buf, buf_len, "Montreal");
+            }
+            if (strcmp(pkey, "hood") == 0) {
+                int hi = (int)(inst->param_hood * (float)(N_MONTREAL_HOODS - 1) + 0.5f);
+                if (hi < 0) hi = 0;
+                if (hi >= (int)N_MONTREAL_HOODS) hi = (int)N_MONTREAL_HOODS - 1;
+                return snprintf(buf, buf_len, "%s", MONTREAL_HOODS[hi].name);
+            }
+            /* Float params: show percentage */
+            float *p = get_param_ptr(inst, pkey);
+            if (p) return snprintf(buf, buf_len, "%d%%", (int)(*p * 100));
         }
         return -1;
     }
@@ -1462,6 +1508,25 @@ static int get_param(void *instance, const char *key, char *buf, int buf_len) {
         return snprintf(buf, buf_len, "%s", MONTREAL_HOODS[hi].name);
     }
 
+    /* Enum param: terrain */
+    if (strcmp(key, "terrain") == 0) {
+        int cat = (int)(inst->param_terrain * (float)(N_TERRAIN_NAMES - 1) + 0.5f);
+        if (cat < 0) cat = 0; if (cat >= N_TERRAIN_NAMES) cat = N_TERRAIN_NAMES - 1;
+        return snprintf(buf, buf_len, "%s", TERRAIN_NAMES[cat]);
+    }
+
+    /* Enum param: hold */
+    if (strcmp(key, "hold") == 0) {
+        const char *hn[] = {"Freeze","Drift","Grain"};
+        int h = (inst->param_hold < 0.33f) ? 0 : (inst->param_hold < 0.66f) ? 1 : 2;
+        return snprintf(buf, buf_len, "%s", hn[h]);
+    }
+
+    /* Float param: depth */
+    if (strcmp(key, "depth") == 0) {
+        return snprintf(buf, buf_len, "%.0f%%", inst->param_depth * 100.0f);
+    }
+
     /* Individual param values */
     float *p = get_param_ptr(inst, key);
     if (p) return snprintf(buf, buf_len, "%.4f", *p);
@@ -1471,8 +1536,8 @@ static int get_param(void *instance, const char *key, char *buf, int buf_len) {
         return snprintf(buf, buf_len,
             "%.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g %.9g",
             inst->param_terrain, inst->param_depth,
-            inst->param_rise, inst->param_hold,
-            inst->param_fall, inst->param_strike,
+            inst->param_length, inst->param_rise,
+            inst->param_hold, inst->param_fall,
             inst->param_lock, inst->param_erode,
             inst->param_flow, inst->param_scatter,
             inst->param_stretch, inst->param_grain,
@@ -1496,9 +1561,8 @@ static void render_block(void *instance, int16_t *out_lr, int frames) {
     if (frames > BLOCK_SIZE) frames = BLOCK_SIZE;
 
     /* Vactrol model parameters derived from knobs */
-    float rise_rate = 0.01f + (1.0f - inst->param_rise) * 0.09f;   /* faster rise → higher rate */
-    float fall_rate = 0.0001f + (1.0f - inst->param_fall) * 0.005f; /* slower fall → lower rate */
-    float nonlinearity = inst->param_strike;
+    float rise_rate = 0.01f + (1.0f - inst->param_rise) * 0.09f;
+    float fall_rate = 0.0001f + (1.0f - inst->param_fall) * 0.005f;
     float drift_depth = inst->param_drift;
 
     /* Hold mode */
@@ -1522,25 +1586,25 @@ static void render_block(void *instance, int16_t *out_lr, int frames) {
         int slot_len = slot->length;
         if (slot_len < 2) { v->active = 0; continue; }
 
-        /* Pre-compute per-voice constants (hoisted from per-sample loop) */
-        float vel_shaped = powf(v->velocity, 1.0f + nonlinearity);
+        /* Pre-compute per-voice constants */
+        float vel_shaped = v->velocity;
         float pan = clampf(v->pan + drift_process(&v->drift_pan, drift_depth * 0.3f), -1.0f, 1.0f);
         float pan_angle = (pan + 1.0f) * 0.25f * (float)M_PI;
         float pan_gain_l = cosf(pan_angle);
         float pan_gain_r = sinf(pan_angle);
 
         for (int i = 0; i < frames; i++) {
-            /* ── Ternary Envelope ── */
+            /* ── Envelope: Rise → Sustain (looping) → Fall ── */
             switch (v->env_stage) {
                 case ENV_RISE:
                     v->env_level += v->env_rise_rate;
                     if (v->env_level >= 1.0f) {
                         v->env_level = 1.0f;
-                        v->env_stage = ENV_HOLD;
+                        v->env_stage = ENV_SUSTAIN;
                     }
                     break;
-                case ENV_HOLD:
-                    /* Sustain: behavior depends on hold_mode */
+                case ENV_SUSTAIN:
+                    /* Loops indefinitely until note-off */
                     break;
                 case ENV_FALL:
                     v->env_level -= v->env_fall_rate;
@@ -1548,7 +1612,6 @@ static void render_block(void *instance, int16_t *out_lr, int frames) {
                         v->env_level = 0.0f;
                         v->env_stage = ENV_OFF;
                         v->active = 0;
-                        /* Mark slot as ready again (not playing) */
                         atomic_store(&slot->state, SLOT_READY);
                     }
                     break;
@@ -1558,53 +1621,72 @@ static void render_block(void *instance, int16_t *out_lr, int frames) {
 
             if (!v->active) break;
 
-            /* ── Read sample from slot buffer ── */
+            /* Calculate loop boundary once per sample */
+            float loop_end = v->loop_start + (float)v->duration_samples;
+
+            /* ── Read sample with crossfade at loop boundary ── */
             int pos_int = (int)v->read_pos;
             float pos_frac = v->read_pos - (float)pos_int;
             if (pos_int < 0) pos_int = 0;
             if (pos_int >= slot_len - 1) pos_int = slot_len - 2;
-
-            /* Linear interpolation */
             float sample = pcm[pos_int] * (1.0f - pos_frac) + pcm[pos_int + 1] * pos_frac;
 
-            /* ── Advance read position (depends on hold mode during HOLD) ── */
-            if (v->env_stage == ENV_HOLD) {
+            /* Crossfade: near end of loop, blend with loop start */
+            float until_loop = loop_end - v->read_pos;
+            if (until_loop > 0.0f && until_loop < (float)XFADE_SAMPLES) {
+                float t = until_loop / (float)XFADE_SAMPLES; /* 1→0 */
+                /* Read from loop start region (fading in) */
+                float xf_offset = (float)(XFADE_SAMPLES - (int)until_loop) * (v->play_speed / (float)BLOCK_SIZE);
+                float xf_pos = v->loop_start + xf_offset;
+                while (xf_pos >= (float)slot_len) xf_pos -= (float)slot_len;
+                while (xf_pos < 0.0f) xf_pos += (float)slot_len;
+                int xf_int = (int)xf_pos;
+                float xf_frac = xf_pos - (float)xf_int;
+                if (xf_int >= slot_len - 1) xf_int = slot_len - 2;
+                float xf_sample = pcm[xf_int] * (1.0f - xf_frac) + pcm[xf_int + 1] * xf_frac;
+                sample = sample * t + xf_sample * (1.0f - t);
+            }
+
+            /* ── Advance read position (Hold mode affects sustain behavior) ── */
+            if (v->env_stage == ENV_SUSTAIN) {
                 switch (hold_mode) {
                     case HOLD_FREEZE:
-                        /* Very slow crawl — not dead stop, avoids DC */
-                        v->read_pos += v->play_speed * 0.02f;
+                        /* Clean loop at normal speed — no drift or jitter */
+                        v->read_pos += v->play_speed;
                         break;
                     case HOLD_DRIFT:
-                        /* Slow scan with organic drift */
                         v->read_pos += v->play_speed * 0.1f;
                         v->read_pos += drift_process(&v->drift_pos, drift_depth) * 10.0f;
                         break;
                     case HOLD_GRANULATE:
-                        /* Micro-loop around grain_origin */
                         v->read_pos += v->play_speed;
                         if (v->read_pos > v->grain_origin + v->grain_size_samples) {
                             v->read_pos = v->grain_origin;
-                            /* Jitter the grain origin slightly */
                             v->grain_origin += (randf(&inst->rng) - 0.5f) * v->grain_size_samples * 0.3f;
                             v->grain_origin = clampf(v->grain_origin, 0, (float)(slot_len - 1));
                         }
                         break;
                 }
             } else {
-                /* During RISE and FALL: normal playback + drift */
                 v->read_pos += v->play_speed;
                 v->read_pos += drift_process(&v->drift_pos, drift_depth * 0.5f) * 5.0f;
             }
 
-            /* Wrap read position */
-            if (v->read_pos >= (float)slot_len) v->read_pos = 0.0f;
-            if (v->read_pos < 0.0f) v->read_pos = (float)(slot_len - 1);
+            /* Loop: based on actual read_pos position, not samples_played counter.
+             * This prevents scratching when play_speed != 1.0 */
+            if (v->read_pos >= loop_end) {
+                v->read_pos = v->loop_start + fmodf(v->read_pos - v->loop_start, (float)v->duration_samples);
+            }
+
+            /* Wrap read position within slot */
+            if (v->read_pos >= (float)slot_len) v->read_pos -= (float)slot_len;
+            if (v->read_pos < 0.0f) v->read_pos += (float)slot_len;
 
             /* ── Vactrol LPG ── */
             v->lpg.vactrol_cv = v->env_level * vel_shaped;
-            float processed = vactrol_process(&v->lpg, sample, rise_rate, fall_rate, nonlinearity);
+            float processed = vactrol_process(&v->lpg, sample, rise_rate, fall_rate, 0.3f);
 
-            /* ── Pan + mix (using pre-computed gains, update slowly via drift) ── */
+            /* ── Pan + mix ── */
             mix_buf_l[i] += processed * pan_gain_l;
             mix_buf_r[i] += processed * pan_gain_r;
         }
@@ -1632,6 +1714,24 @@ static void render_block(void *instance, int16_t *out_lr, int frames) {
             float pool_sample = inst->echo_pool[read_pos] * pool_blend * 0.5f;
             l += pool_sample;
             r += pool_sample;
+        }
+
+        /* Spectral Lock: resonant bandpass, Lock controls wet blend + Q */
+        if (inst->param_lock > 0.001f) {
+            float lock_q = 1.0f + inst->param_lock * 29.0f;  /* Q 1–30 */
+            float lock_f = 800.0f + inst->param_lock * 2200.0f; /* 800Hz–3kHz */
+            float lock_fb = 1.0f / lock_q;
+            float lock_w = 2.0f * (float)M_PI * lock_f / SAMPLE_RATE;
+            if (lock_w > 1.0f) lock_w = 1.0f;
+            float mono = (l + r) * 0.5f;
+            /* Chamberlin SVF */
+            inst->lock_bp_z1 += lock_w * (mono - inst->lock_bp_z1 * lock_fb - inst->lock_bp_z2);
+            inst->lock_bp_z2 += lock_w * inst->lock_bp_z1;
+            if (fabsf(inst->lock_bp_z1) < 1e-15f) inst->lock_bp_z1 = 0.0f;
+            if (fabsf(inst->lock_bp_z2) < 1e-15f) inst->lock_bp_z2 = 0.0f;
+            float locked = inst->lock_bp_z1 * lock_fb; /* Q-normalized BP */
+            l = lerpf(l, locked, inst->param_lock);
+            r = lerpf(r, locked, inst->param_lock);
         }
 
         /* Erosion: progressive LPF that gets more aggressive over time */
