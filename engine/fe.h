@@ -89,6 +89,7 @@ float fe_get(const fe_engine *e, int v, int id);
 float fe_get_global(const fe_engine *e, int id);
 int   fe_voice_state(const fe_engine *e, int v);
 int   fe_voice_busy(const fe_engine *e, int v);             /* a harvest is wanted or running */
+int   fe_voice_searching(const fe_engine *e, int v);        /* the worker is listening for it now */
 int   fe_voice_frozen(const fe_engine *e, int v);
 float fe_voice_wear(const fe_engine *e, int v);
 float fe_voice_pos(const fe_engine *e, int v);               /* play head 0..1 of the tape */

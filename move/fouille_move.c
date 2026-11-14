@@ -104,10 +104,11 @@ static int get_param(void *p, const char *key, char *buf, int len) {
     fe_engine *e = s->e;
     int v = 0, id = 0; float x = 0;
 
-    if (!strcmp(key, "st")) {                      /* per voice: 'a' + state | busy<<2 | frozen<<3 */
+    if (!strcmp(key, "st")) {                      /* per voice: '0' + state | busy<<2 | frozen<<3 | searching<<4 */
         if (len < FE_NV + 1) return -1;
         for (int i = 0; i < FE_NV; i++)
-            buf[i] = (char)('a' + (fe_voice_state(e, i) | (fe_voice_busy(e, i) << 2) | (fe_voice_frozen(e, i) << 3)));
+            buf[i] = (char)('0' + (fe_voice_state(e, i) | (fe_voice_busy(e, i) << 2) | (fe_voice_frozen(e, i) << 3)
+                                  | (fe_voice_searching(e, i) << 4)));
         buf[FE_NV] = 0;
         return FE_NV;
     }

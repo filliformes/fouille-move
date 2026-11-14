@@ -480,6 +480,7 @@ int   fe_voice_busy(const fe_engine *e, int v) {
     fe_voice *x = &((fe_engine *)e)->voices[v];
     return atomic_load(&x->want) || atomic_load(&x->searching) || atomic_load(&((fe_engine *)e)->pending) == v;
 }
+int   fe_voice_searching(const fe_engine *e, int v) { return vok(v) ? atomic_load(&((fe_engine *)e)->voices[v].searching) : 0; }
 int   fe_voice_frozen(const fe_engine *e, int v) { return vok(v) ? e->voices[v].frozen : 0; }
 float fe_voice_wear(const fe_engine *e, int v) { return vok(v) ? e->voices[v].wear : 0; }
 float fe_voice_pos(const fe_engine *e, int v) {

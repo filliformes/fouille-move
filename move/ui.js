@@ -12,7 +12,7 @@
 
 import {
     Black, White, LightGrey, DarkGrey,
-    NeonGreen, DarkMutedTeal, MutedTeal, AzureBlue, VeryDarkAzure, BrightOrange,
+    NeonGreen, DarkMutedTeal, VeryDarkAzure,
     MoveShift, MoveBack, MoveLeft, MoveRight, MoveUp, MoveDown, MoveMainKnob,
     MoveKnob1, MoveSteps, MoveCopy, MoveMenu, MoveUndo, MoveCapture,
     WhiteLedOff, WhiteLedDim, WhiteLedBright,
@@ -52,7 +52,7 @@ const VIEWS = ['Voix', 'Carte', 'Credits'];
 /* ---- state ---- */
 let sel = 0, page = 0, view = 0, tickN = 0, shift = false;
 const st = new Array(NV).fill(0);          /* engine state 0..3 */
-const busy = new Array(NV).fill(false), frozen = new Array(NV).fill(false);
+const busy = new Array(NV).fill(false), frozen = new Array(NV).fill(false), searching = new Array(NV).fill(false);
 const latched = new Array(NV).fill(false), downAt = new Array(NV).fill(0), consumed = new Array(NV).fill(false);
 const lastTap = new Array(NV).fill(0);
 let pv = [];                                /* params of the selected voice */
@@ -79,17 +79,25 @@ function clamp(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 let ledQ = [];
 function enq(note, c) { ledQ.push([note, c]); }
 function drainLEDs() { let n = 8; while (n-- > 0 && ledQ.length) { const e = ledQ.shift(); setLED(e[0], e[1]); } }
-let blink = false;
+/* No blinking anywhere: a pad changes colour only when its voice changes state.
+ * (v0.3.0 blinked every searching pad at load: 16 pads flashing. Vincent: unpleasant.) */
+const padShown = new Array(NV).fill(-1);
 function voiceColor(i) {
-    if (busy[i] && st[i] < 2) return blink ? AzureBlue : VeryDarkAzure;            /* fouille : respire */
-    if (st[i] === 0) return DarkGrey;
-    if (st[i] === 3) return frozen[i] ? White : (busy[i] && blink ? MutedTeal : NeonGreen);
-    return frozen[i] ? LightGrey : (busy[i] && blink ? MutedTeal : DarkMutedTeal);
+    if (st[i] < 2) return searching[i] ? VeryDarkAzure : Black;      /* empty; dim blue = listening now */
+    if (st[i] === 3) return frozen[i] ? White : NeonGreen;
+    return frozen[i] ? LightGrey : DarkMutedTeal;
+}
+function paintVoice(i, force) {
+    const c = voiceColor(i);
+    if (!force && c === padShown[i]) return;
+    padShown[i] = c;
+    if (force) setLED(LEFT[i], c, true); else enq(LEFT[i], c);
 }
 function paintAll(force) {
     for (let i = 0; i < NV; i++) {
-        if (force) { setLED(LEFT[i], voiceColor(i), true); setLED(RIGHT[i], Black, true); setLED(MoveSteps[i], i === sel ? White : Black, true); }
-        else { enq(LEFT[i], voiceColor(i)); enq(MoveSteps[i], i === sel ? White : Black); }
+        paintVoice(i, force);
+        if (force) { setLED(RIGHT[i], Black, true); setLED(MoveSteps[i], i === sel ? White : Black, true); }
+        else enq(MoveSteps[i], i === sel ? White : Black);
     }
     setButtonLED(MoveLeft, page > 0 ? WhiteLedBright : WhiteLedDim, true);
     setButtonLED(MoveRight, page < PAGES.length - 1 ? WhiteLedBright : WhiteLedDim, true);
@@ -107,12 +115,12 @@ function pollStates() {
     const s = gp('st');
     if (!s || s.length < NV) return;
     for (let i = 0; i < NV; i++) {
-        const c = s.charCodeAt(i) - 97;
-        const nst = c & 3, nb = !!(c & 4), nf = !!(c & 8);
-        if (nst !== st[i] || nb !== busy[i] || nf !== frozen[i]) {
+        const c = s.charCodeAt(i) - 48;
+        const nst = c & 3, nb = !!(c & 4), nf = !!(c & 8), ns = !!(c & 16);
+        if (nst !== st[i] || nb !== busy[i] || nf !== frozen[i] || ns !== searching[i]) {
             const arrived = i === sel && busy[i] && !nb;
-            st[i] = nst; busy[i] = nb; frozen[i] = nf;
-            enq(LEFT[i], voiceColor(i));
+            st[i] = nst; busy[i] = nb; frozen[i] = nf; searching[i] = ns;
+            paintVoice(i, false);
             if (arrived) loadCard();
         }
         if (nst !== 3 && latched[i] && !downAt[i]) latched[i] = false;               /* the DSP is the truth */
@@ -241,7 +249,7 @@ function drawStrip() {
         const x = i * 8;
         if (st[i] === 3) fill_rect(x + 1, 10, 6, 3, 1);
         else if (st[i] === 2) fill_rect(x + 1, 12, 6, 1, 1);
-        else if (busy[i] && blink) fill_rect(x + 3, 11, 2, 1, 1);
+        else if (searching[i]) fill_rect(x + 3, 11, 2, 1, 1);
         if (i === sel) draw_rect(x, 10, 8, 4, 1);
     }
 }
@@ -322,15 +330,11 @@ globalThis.init = function () {
     say('Fouille : 16 voix ecoutent', 2500);
 };
 globalThis.onUnload = function () { clearAll(); };
-globalThis.onResume = function () { pollStates(); loadParams(); loadCard(); paintAll(true); resume = 4; };
+globalThis.onResume = function () { pollStates(); loadParams(); loadCard(); paintAll(true); resume = 2; };
 let resume = 0;
 
 globalThis.tick = function () {
     tickN++;
-    if (tickN % 10 === 0) {
-        blink = !blink;
-        for (let i = 0; i < NV; i++) if (busy[i]) enq(LEFT[i], voiceColor(i));
-    }
     if (tickN % 3 === 0) pollStates();
     if (view === 0 && st[sel] === 3 && tickN % 2 === 0) { const p = parseFloat(gp('pos:' + sel)); if (!isNaN(p)) pos = p; }
     if (tickN % 40 === 7) { const n = gp('net'); if (n != null) net = n; }
