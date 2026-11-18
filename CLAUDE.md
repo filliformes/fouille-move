@@ -58,6 +58,19 @@ Voice architecture: 8-voice polyphonic, round-robin stealing.
 - v0.5.2: Lieu page knobs 5-8 = Coupe bas (6 dB/oct, 10 Hz-2 kHz, `FE_P_LOCUT`), Coupe haut (6 dB/oct,
   2.1 kHz-20 kHz, right = open, `FE_P_HICUT`; v0.5.3 flipped it, state `R:2` marks the new sense), Vitesse (same param as Matiere k1, x0.25-x4, x1 default), Volume.
   A held right pad still takes knobs 5-8 for its settings. New params sit at the end of the voice state.
+- v0.6.0 (navigation like Loopex): step buttons select the sound, the same step again = next page
+  (Lieu, Geste, Matiere, Espace). Left / Right held = tape stop / wind (`fe_tape_hold`, key `th v,hold`,
+  per voice, Loopex's curve in log2 speed; Shift = the selected sound). Track buttons (MoveRow1..4):
+  1 Carte (jog = place of the selected sound), 2 Espace commun (pool, Ressac latched amount + settings, Out),
+  3 Gestes (latched list; k1 amount and k5-8 settings of the last right pad touched), 4 Output = Loopex's
+  Settings p2 (Out, LoCut, HiCut, PWide, Char, gSat, Glue, Limit), DSP ported in `engine/fe_master.c` after
+  Fouille's bus (`tanh(mix)*0.6`), plus Loopex's TPDF dither in `render_block`. PWide = width of the shared
+  returns (pool + Ressac): Fouille has no punch bank. Globals are now 10 (`FE_G_*`), Out = G0 * 1.5.
+  Menu (three lines) = Sessions like Loopex: 64 slots in /data/UserData/UserLibrary/Fouille/sessionNN/
+  (state.txt, meta.txt with the fiches, name.txt, sNN_sonMM.wav), disk I/O on the harvest worker
+  (`engine/fe_session.c`), load hands each fragment over like a harvest (`pend_load`), then the state is
+  applied quietly (`fe_set_quiet`: no new harvest). State `R:3` (G0 migrated from the old level), `A:` =
+  latched gesture amounts. Clear = every sound emptied; Reset / RstAll = settings except place and source.
 
 ## Repo structure (v0.2, legacy)
 - `src/dsp/fouille.c` — all DSP logic (vactrol LPG, fetch thread, corpus navigator, ternary envelope, render_block)

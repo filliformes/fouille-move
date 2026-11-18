@@ -69,7 +69,23 @@ void fe_pressure(fe_engine *e, int v, float p)        { if (vok(v)) push(e, EV_P
 void fe_refetch(fe_engine *e, int v)                  { if (vok(v)) push(e, EV_REFETCH, v, 0, 0); }
 void fe_freeze(fe_engine *e, int v, int on)           { if (vok(v)) push(e, EV_FREEZE, v, 0, (float)on); }
 void fe_set(fe_engine *e, int v, int id, float x)     { if (vok(v) && id >= 0 && id < FE_P_COUNT) push(e, EV_SET, v, id, clampf(x, 0, 1)); }
+void fe_set_quiet(fe_engine *e, int v, int id, float x) { if (vok(v) && id >= 0 && id < FE_P_COUNT) push(e, EV_SETQ, v, id, clampf(x, 0, 1)); }
 void fe_set_global(fe_engine *e, int id, float x)     { if (id >= 0 && id < FE_G_COUNT) push(e, EV_GSET, 0, id, clampf(x, 0, 1)); }
+void fe_tape_hold(fe_engine *e, int v, int hold)         { if (v >= -1 && v < FE_NV) push(e, EV_TAPE, v < 0 ? 255 : v, 0, (float)(hold < 0 ? -1 : hold > 0 ? 1 : 0)); }
+void fe_clear_all(fe_engine *e)                       { push(e, EV_CLEAR, 0, 0, 0); }
+
+static const float G_DEFAULT[FE_G_COUNT] = {
+    [FE_G_VOLUME] = 1.0f / 1.5f, [FE_G_POOL_TIME] = 0.6f, [FE_G_POOL_FB] = 0.45f,
+    [FE_G_LOCUT] = 0, [FE_G_HICUT] = 1.0f, [FE_G_PWIDE] = 0.5f, [FE_G_CHAR] = 1.0f / 12.0f,
+    [FE_G_GSAT] = 0, [FE_G_GLUE] = 0, [FE_G_LIMIT] = 0,
+};
+float fe_global_default(int id) { return (id >= 0 && id < FE_G_COUNT) ? G_DEFAULT[id] : 0; }
+float fe_param_default(int v, int id) {
+    if (id < 0 || id >= FE_P_COUNT) return 0;
+    if (id == FE_P_PLACE) return (float)(((v % FE_NV) + FE_NV) % FE_NV % FE_NPLACES) / (float)(FE_NPLACES - 1);
+    if (id == FE_P_PAN) return 0.5f + ((float)(((v % 4) + 4) % 4) - 1.5f) * 0.12f;
+    return P_DEFAULT[id];
+}
 
 /* ── gestures: settings, mappings, API ──────────────────────────────────── */
 
@@ -338,6 +354,7 @@ static void do_swap(fe_engine *e, int vi) {
     v->wear = 0; v->since_swap = 0; v->rw_done = 0; v->rw_on = 0;
     compute_region(e, v);
     start_position(v, 0);
+    atomic_store_explicit(&e->pend_load, 0, memory_order_relaxed);
     atomic_store_explicit(&e->pending, -1, memory_order_release);   /* spare back to the worker */
 }
 
@@ -395,6 +412,11 @@ static void apply_event(fe_engine *e, const fe_event *ev) {
         }
         break;
     case EV_FREEZE:  v->frozen = ev->val > 0.5f; break;
+    case EV_SETQ:                                        /* a session's settings: the fragment it came with stays */
+        v->p[ev->id] = ev->val;
+        if (ev->id == FE_P_START || ev->id == FE_P_LENGTH) { compute_region(e, v); keep_in_region(v); }
+        if (ev->id == FE_P_PLACE) v->drift_km = 0;
+        break;
     case EV_SET: {
         float old = v->p[ev->id];
         v->p[ev->id] = ev->val;
@@ -407,6 +429,21 @@ static void apply_event(fe_engine *e, const fe_event *ev) {
         }
         break; }
     case EV_GSET: e->g[ev->id] = ev->val; break;
+    case EV_TAPE:
+        for (int k = 0; k < FE_NV; k++) if (ev->v >= FE_NV || k == ev->v) e->voices[k].tp_hold = (int)ev->val;
+        break;
+    case EV_CLEAR:                                       /* every sound closed and emptied; settings stay */
+        for (int k = 0; k < FE_NV; k++) {
+            fe_voice *w = &e->voices[k];
+            w->env_stage = ENV_OFF; w->env = 0; w->swapping = 0; w->adopt = 0; w->reseek = 0; w->duck = 1.0f;
+            w->frozen = 0; w->auto_close = 0; w->gel_on = 0; w->gel_mix = 0;
+            drop_next(e, w);
+            w->tape->frames = 0; w->past->frames = 0; w->past_on = 0; w->past_mix = 0;
+            w->tape->card.title[0] = 0; w->tape->card.kind = 0;
+            w->wear = 0; w->since_swap = 0; w->drift_km = 0;
+            atomic_store(&w->want, 0);
+        }
+        break;
     case EV_GEST:
         if (ev->v >= FE_NV) e->gx[ev->id] = ev->val;
         else v->vx[ev->id] = ev->val;
@@ -695,6 +732,9 @@ static void render_voice(fe_engine *e, fe_voice *v, int vi, float *ml, float *mr
     float dp = drift_step(&v->dpitch, 0.02f) * drift;
     float dpan = drift_step(&v->dpan, 0.02f) * drift;
     float spd = m_speed(v->p[FE_P_SPEED]) * (1.0f + 0.03f * dp);
+    const float tp_g0 = v->tp_g0;
+    if (v->tp_ls != 0.0f) spd *= exp2f(v->tp_ls);              /* tape transport */
+    const float tp_g1 = v->tp_gain, tp_gstep = (tp_g1 - tp_g0) / (float)n;
     if (rev) spd = -spd;
     const float st_link = e->xp[FE_X_ETIREMENT][3];
     const float spd_adv = spd / tf;                    /* how fast the head moves through the fragment */
@@ -1198,7 +1238,7 @@ static void render_voice(fe_engine *e, fe_voice *v, int vi, float *ml, float *mr
         if (v->swapping) { v->duck -= duck_step; if (v->duck < 0) v->duck = 0; }
 
         float m = (out[0] + out[1]) * 0.5f, s = (out[0] - out[1]) * 0.5f * width;
-        float g = vol * v->duck;
+        float g = vol * v->duck * (tp_g0 + tp_gstep * (float)(i + 1));
         float ol = (m + s) * pg_l * g, orr = (m - s) * pg_r * g;
         if (my_post_l) { my_post_l[i] = ol; my_post_l[512 + i] = orr; }
         if (c_post > 0) {                                        /* Contagion, played side: over the top */
@@ -1231,7 +1271,7 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
 
     /* hand-over of a fresh fragment, at a note boundary */
     int pv = atomic_load_explicit(&e->pending, memory_order_acquire);
-    if (pv >= 0 && e->voices[pv].want_next) {        /* Futur: keep it aside instead of playing it */
+    if (pv >= 0 && e->voices[pv].want_next && !atomic_load_explicit(&e->pend_load, memory_order_relaxed)) {        /* Futur: keep it aside instead of playing it */
         fe_voice *v = &e->voices[pv];
         v->want_next = 0;
         if (e->nfree > 0) {
@@ -1303,6 +1343,17 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
     float rs_target = 0;
     for (int vi = 0; vi < FE_NV; vi++) {
         fe_voice *v = &e->voices[vi];
+        {   /* tape transport (Loopex): linear in log2(speed); brake -3 oct/s down to -9, wind +2 oct/s up to +5,
+             * release glides back over 0.35 s; the last three octaves down fade out. Closed sounds keep moving. */
+            float ls = v->tp_ls;
+            v->tp_g0 = v->tp_gain;
+            if (v->tp_hold < 0)      { ls -= 3.0f * dt; if (ls < -9.0f) ls = -9.0f; }
+            else if (v->tp_hold > 0) { ls += 2.0f * dt; if (ls > 5.0f) ls = 5.0f; }
+            else if (ls != 0.0f)     { ls += (0.0f - ls) * (1.0f - expf(-dt / 0.35f)); if (fabsf(ls) < 1e-4f) ls = 0.0f; }
+            v->tp_ls = ls;
+            v->tp_gain = clampf((ls + 9.0f) / 3.0f, 0.0f, 1.0f);
+            atomic_store_explicit(&e->tp_pub[vi], (int)(exp2f(ls) * 1000.0f + 0.5f), memory_order_relaxed);
+        }
         gestures_block(e, v, vi, n, &bong_rank, &past_rank, pv);
         if (v->auto_close > 0) {                              /* Hesitation replayed a closed sound: it closes itself */
             v->auto_close -= n;
@@ -1375,7 +1426,7 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
     if (D >= e->pool_len) D = e->pool_len - 1;
     if (D < 1) D = 1;
     const float plp = 1.0f - expf(-2.0f * (float)M_PI * 5000.0f / e->sr);
-    const float mv = e->g[FE_G_VOLUME];
+    const float pw2 = e->g[FE_G_PWIDE] * 2.0f;                         /* PWide: width of the shared returns, 1 = as is */
     for (int i = 0; i < n; i++) {
         int rp = e->pool_w - D; if (rp < 0) rp += e->pool_len;
         float pl = e->pool_l[rp], pr = e->pool_r[rp];
@@ -1384,8 +1435,8 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
         e->pool_l[e->pool_w] = flush(sl[i] + e->pool_lp[1] * fb);      /* cross-fed: it wanders across */
         e->pool_r[e->pool_w] = flush(srr[i] + e->pool_lp[0] * fb);
         if (++e->pool_w >= e->pool_len) e->pool_w = 0;
-        float l = ml[i] + pl * 0.8f, r = mr[i] + pr * 0.8f;
-        if (e->lastmix) e->lastmix[i] = (l + r) * 0.5f;
+        float wl = pl * 0.8f, wr = pr * 0.8f;                         /* the wet: pool, then Ressac */
+        if (e->lastmix) e->lastmix[i] = (ml[i] + mr[i] + wl + wr) * 0.5f;
         if (rs_live) {
             e->rs_d += (rs_dt - e->rs_d) * rs_gk;
             float y[2];
@@ -1409,10 +1460,18 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
             e->rs_l[e->rs_w] = flush(rl[i] + y[1] * rs_fb);            /* crossed, like the pool */
             e->rs_r[e->rs_w] = flush(rr[i] + y[0] * rs_fb);
             if (++e->rs_w >= e->rs_len) e->rs_w = 0;
-            l += y[0] * rs_gain; r += y[1] * rs_gain;
+            wl += y[0] * rs_gain; wr += y[1] * rs_gain;
         }
-        out_l[i] = tanhf(l) * mv;
-        out_r[i] = tanhf(r) * mv;
+        if (pw2 != 1.0f) { float wm = 0.5f * (wl + wr), ws = 0.5f * (wl - wr) * pw2; wl = wm + ws; wr = wm - ws; }
+        out_l[i] = tanhf(ml[i] + wl) * 0.6f;                          /* Fouille's bus (Out x1 = the level it always had) */
+        out_r[i] = tanhf(mr[i] + wr) * 0.6f;
+    }
+    {   /* Output (Track 4), Loopex's stage */
+        const int chr = (int)floorf(e->g[FE_G_CHAR] * (float)(FE_NCHAR - 1) + 0.5f);
+        const double lo = 20.0 + 980.0 * (double)e->g[FE_G_LOCUT], hi = 1000.0 + 19000.0 * (double)e->g[FE_G_HICUT];
+        fe_master_block(&e->master, chr, lo, hi, e->sr);
+        fe_master_run(&e->master, out_l, out_r, n, chr, lo, hi, 2.0 * (double)e->g[FE_G_GSAT], (double)e->g[FE_G_GLUE],
+                      (double)e->g[FE_G_LIMIT], 1.5 * (double)e->g[FE_G_VOLUME], e->sr);
     }
     for (int i = n; i < frames; i++) out_l[i] = out_r[i] = 0;
 }
@@ -1455,7 +1514,11 @@ fe_engine *fe_create(const fe_config *cfg) {
     e->scratch_r = calloc(512, sizeof(float));
     if (!ok || !e->pool_l || !e->pool_r || !e->rs_l || !e->rs_r || !e->vbuf || !e->lastmix || !e->scratch_l || !e->scratch_r) { fe_destroy(e); return NULL; }
 
-    e->g[FE_G_VOLUME] = 0.6f; e->g[FE_G_POOL_TIME] = 0.6f; e->g[FE_G_POOL_FB] = 0.45f;
+    memcpy(e->g, G_DEFAULT, sizeof G_DEFAULT);
+    fe_master_init(&e->master, e->sr);
+    e->ss_state_cap = 16384;
+    e->ss_state = calloc((size_t)e->ss_state_cap, 1);
+    if (!e->ss_state) { fe_destroy(e); return NULL; }
     uint32_t seed = cfg->seed ? cfg->seed : 0x5EED1234u;
     e->wrng = seed ^ 0xA5A5A5A5u;
     for (int i = 0; i < FE_NV; i++) {
@@ -1466,7 +1529,8 @@ fe_engine *fe_create(const fe_config *cfg) {
         memcpy(v->p, P_DEFAULT, sizeof(P_DEFAULT));
         v->p[FE_P_PLACE] = (float)(i % FE_NPLACES) / (float)(FE_NPLACES - 1);
         v->p[FE_P_PAN] = 0.5f + ((float)(i % 4) - 1.5f) * 0.12f;
-        v->duck = 1.0f;
+        v->duck = 1.0f; v->tp_gain = 1.0f; v->tp_g0 = 1.0f;
+        atomic_store(&e->tp_pub[i], 1000);
         v->rng = seed + 7919u * (uint32_t)(i + 1);
         v->dpitch.rng = seed * 3u + 104729u * (uint32_t)(i + 1);
         v->dpan.rng = seed * 5u + 1299709u * (uint32_t)(i + 1);
@@ -1487,7 +1551,7 @@ void fe_destroy(fe_engine *e) {
     fe_harvest_stop(e);
     for (int i = 0; i < FE_NTAPES; i++) free(e->tapes[i].pcm);
     free(e->pool_l); free(e->pool_r); free(e->rs_l); free(e->rs_r); free(e->vbuf); free(e->lastmix); free(e->scratch_l); free(e->scratch_r);
-    free(e->dec); free(e->net_buf);
+    free(e->dec); free(e->net_buf); free(e->ss_state);
     free(e);
 }
 
@@ -1519,6 +1583,7 @@ int fe_voice_wave(const fe_engine *e, int v, uint8_t *out, int n) {
     for (int i = 0; i < n; i++) out[i] = t->frames ? t->wave[(i * FE_WAVE_N) / n] : 0;
     return n;
 }
+float fe_tape_speed(const fe_engine *e, int v) { return vok(v) ? (float)atomic_load(&((fe_engine *)e)->tp_pub[v]) / 1000.0f : 1.0f; }
 int fe_net_status(const fe_engine *e, char *buf, int len) {
     return snprintf(buf, (size_t)len, "%s", e->net_msg);
 }

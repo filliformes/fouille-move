@@ -430,6 +430,105 @@ static void gesture_tests2(float SR) {
     free(a); free(b); free(c);
 }
 
+
+/* v0.6.0: tape transport, the Output stage (Loopex), sessions */
+static void v06_tests(float SR) {
+    printf("v0.6.0: tape, output, sessions\n");
+    fe_engine *e = make(SR);
+    for (int v = 0; v < 4; v++) fe_gate(e, v, 1, 0.8f);
+    stats base = run(e, SR, 1.0f, 128, NULL);
+    fe_tape_hold(e, -1, -1);                                   /* hold Left: brake */
+    run(e, SR, 1.0f, 128, NULL);
+    float s1 = fe_tape_speed(e, 0);
+    CHECK(s1 < 0.2f && s1 > 0.05f, "tape stop: one second down = 3 octaves (x%.3f)", s1);
+    run(e, SR, 2.5f, 128, NULL);
+    stats stopped = run(e, SR, 0.5f, 128, NULL);
+    CHECK(fe_tape_speed(e, 0) < 0.003f && rms(stopped) < rms(base) * 0.1f, "after ~3 s it has stopped and faded (x%.4f, rms %.4f vs %.4f)",
+          fe_tape_speed(e, 0), rms(stopped), rms(base));
+    fe_tape_hold(e, -1, 0);                                    /* release: glides back */
+    run(e, SR, 3.0f, 128, NULL);
+    CHECK(fabsf(fe_tape_speed(e, 0) - 1.0f) < 0.01f, "released, it glides back to x1 (x%.3f)", fe_tape_speed(e, 0));
+    fe_tape_hold(e, 2, 1);                                     /* Shift + Right: one sound winds up */
+    run(e, SR, 1.0f, 128, NULL);
+    CHECK(fe_tape_speed(e, 2) > 3.5f && fabsf(fe_tape_speed(e, 1) - 1.0f) < 0.01f, "wind on one sound only (x%.2f, others x%.2f)",
+          fe_tape_speed(e, 2), fe_tape_speed(e, 1));
+    fe_tape_hold(e, 2, 0);
+    run(e, SR, 3.0f, 128, NULL);
+
+    /* Output defaults: Out x1 + 962 = about the level Fouille always had */
+    stats now = run(e, SR, 1.0f, 128, NULL);
+    CHECK(now.nan == 0 && now.peak <= 1.0f && rms(now) > 0.003f, "default Output plays (rms %.4f, peak %.3f)", rms(now), now.peak);
+    fe_set_global(e, FE_G_VOLUME, 0.5f / 1.5f);
+    stats half = run(e, SR, 1.0f, 128, NULL);
+    CHECK(rms(half) < rms(now) * 0.65f && rms(half) > rms(now) * 0.35f, "Out x0.5 halves it (%.4f vs %.4f)", rms(half), rms(now));
+    fe_set_global(e, FE_G_VOLUME, 1.0f);
+    for (int c = 0; c < FE_NCHAR; c++) {
+        fe_set_global(e, FE_G_CHAR, (float)c / (FE_NCHAR - 1));
+        fe_set_global(e, FE_G_GSAT, 1.0f); fe_set_global(e, FE_G_GLUE, 1.0f);
+        fe_set_global(e, FE_G_LOCUT, 0.3f); fe_set_global(e, FE_G_HICUT, 0.2f);
+        stats x = run(e, SR, 0.6f, 128, NULL);
+        if (x.nan || x.peak > 4.0f || rms(x) < 1e-4f) CHECK(0, "Char %s runs clean (rms %.4f, peak %.3f)", fe_char_name(c), rms(x), x.peak);
+    }
+    CHECK(1, "13 Character voicings with gSat, Glue, LoCut, HiCut run clean");
+    fe_set_global(e, FE_G_LIMIT, 1.0f); fe_set_global(e, FE_G_GSAT, 1.0f);
+    for (int c = 0; c < FE_NCHAR; c++) {
+        fe_set_global(e, FE_G_CHAR, (float)c / (FE_NCHAR - 1));
+        stats x = run(e, SR, 0.4f, 128, NULL);
+        if (x.nan || x.peak > 1.0f) CHECK(0, "Limit keeps %s under 1 (peak %.3f)", fe_char_name(c), x.peak);
+    }
+    CHECK(1, "Limit keeps every voicing at or under full scale with Out x1.5");
+    fe_destroy(e);
+
+    /* PWide 0 = the shared returns in mono */
+    e = make(SR);
+    fe_set_global(e, FE_G_POOL_FB, 0.8f);
+    for (int v = 0; v < FE_NV; v++) { fe_set(e, v, FE_P_POOL, 1.0f); fe_set(e, v, FE_P_WIDTH, 1.0f); }
+    fe_gate(e, 0, 1, 1.0f); fe_gate(e, 5, 1, 1.0f);
+    run(e, SR, 1.0f, 128, NULL);
+    fe_gate(e, 0, 0, 0); fe_gate(e, 5, 0, 0);
+    fe_set_global(e, FE_G_PWIDE, 0.0f);
+    run(e, SR, 0.4f, 128, NULL);                               /* the voices' tails are gone; the pool still rings */
+    float l[128], r[128]; double side = 0, mid = 0;
+    for (int b = 0; b < 100; b++) { fe_render(e, l, r, 128); for (int i = 0; i < 128; i++) { side += fabs(l[i] - r[i]); mid += fabs(l[i] + r[i]); } }
+    CHECK(mid > 0 && side < mid * 0.03, "PWide 0 folds the pool to mono (side/mid %.4f)", mid > 0 ? side / mid : -1);
+    fe_destroy(e);
+
+    /* sessions: save, clear, load back */
+    char dir[200]; snprintf(dir, sizeof dir, "/tmp/claude-0/fouille-sess-%d", (int)time(NULL));
+    fe_config c = {0};
+    c.sample_rate = SR; c.max_block = 128; c.voice_seconds = 30; c.offline = 1; c.seed = 7; c.session_dir = dir;
+    e = fe_create(&c);
+    for (int t = 0; t < 400; t++) { int rd = 0; for (int v = 0; v < FE_NV; v++) rd += fe_voice_state(e, v) >= FE_VS_READY; if (rd == FE_NV) break; fe_render(e, l, r, 128); msleep(5); }
+    fe_card before; fe_voice_card(e, 4, &before);
+    CHECK(fe_session(e, FE_SS_SAVE, 3, "R:3;G:0.5"), "save accepted");
+    for (int t = 0; t < 400 && fe_session_status(e) != FE_SST_OK; t++) { fe_render(e, l, r, 128); msleep(5); }
+    char names[2000]; fe_session_names(e, names, sizeof names);
+    CHECK(fe_session_status(e) == FE_SST_OK && !strncmp(strchr(strchr(names, ';') + 1, ';') + 1, "03_", 3), "saved: slot 3 has a name (%.20s)", strchr(strchr(names, ';') + 1, ';') + 1);
+    fe_clear_all(e);
+    run(e, SR, 0.1f, 128, NULL);
+    CHECK(fe_voice_state(e, 4) == FE_VS_EMPTY, "Clear empties the sounds (%d)", fe_voice_state(e, 4));
+    fe_gate(e, 7, 1, 0.8f); run(e, SR, 0.2f, 128, NULL);
+    CHECK(fe_session(e, FE_SS_LOAD, 3, NULL), "load accepted");
+    for (int t = 0; t < 1000 && fe_session_status(e) != FE_SST_OK; t++) { fe_render(e, l, r, 128); msleep(2); }
+    run(e, SR, 0.2f, 128, NULL);
+    fe_card after; fe_voice_card(e, 4, &after);
+    CHECK(fe_voice_state(e, 4) == FE_VS_READY && fabsf(after.seconds - before.seconds) < 0.01f && !strcmp(after.place, before.place),
+          "loaded: the fragment is back with its fiche (%.2f s '%s' vs %.2f s '%s')", after.seconds, after.place, before.seconds, before.place);
+    const char *st = fe_session_take_state(e);
+    CHECK(st && !strcmp(st, "R:3;G:0.5") && !fe_session_take_state(e), "its settings text comes back once");
+    fe_gate(e, 4, 1, 0.8f);
+    stats ls = run(e, SR, 1.0f, 128, NULL);
+    CHECK(rms(ls) > 0.003f && ls.nan == 0, "and it plays (rms %.4f)", rms(ls));
+    CHECK(fe_session(e, FE_SS_LOAD, 9, NULL), "load of an empty slot accepted");
+    for (int t = 0; t < 400 && fe_session_status(e) == FE_SST_LOADING; t++) { fe_render(e, l, r, 128); msleep(5); }
+    CHECK(fe_session_status(e) == FE_SST_EMPTY, "an empty slot says so");
+    fe_session(e, FE_SS_DELETE, 3, NULL);
+    for (int t = 0; t < 400 && fe_session_status(e) != FE_SST_OK; t++) { fe_render(e, l, r, 128); msleep(5); }
+    fe_session_names(e, names, sizeof names);
+    CHECK(names[0] == ';' && !strstr(names, "03_"), "deleted: slot 3 is empty again");
+    fe_destroy(e);
+}
+
 int main(void) {
     const float SR = 44100;
     printf("fouille engine tests\n");
@@ -532,6 +631,7 @@ int main(void) {
 
     gesture_tests(SR);
     gesture_tests2(SR);
+    v06_tests(SR);
 
     /* CPU: 16 voices playing, all colours, render time per 128-frame block */
     fe_engine *q = make(SR);

@@ -34,6 +34,7 @@ typedef struct {
     float voice_seconds;        /* tape length per voice (30) */
     const char *curl_path;      /* NULL = search the usual places */
     const char *key_paths[4];   /* Freesound key files, first readable wins */
+    const char *session_dir;    /* sessions live in <dir>/sessionNN/ (NULL = no sessions) */
     int   offline;              /* 1 = never touch the network (tests) */
     uint32_t seed;
 } fe_config;
@@ -50,8 +51,14 @@ enum {
     FE_P_COUNT
 };
 
-/* Global parameters. */
-enum { FE_G_VOLUME = 0, FE_G_POOL_TIME, FE_G_POOL_FB, FE_G_COUNT };
+/* Global parameters, normalized 0..1 at the API.
+ * FE_G_VOLUME is the Output page's Out (x0..x1.5, 2/3 = x1). The rest of the Output page is a
+ * port of Loopex's output stage: LoCut 20..1000 Hz, HiCut 1000..20000 Hz, PWide (width of the
+ * shared returns: pool + Ressac; 0.5 = as is), Char (13 voicings), gSat 0..2, Glue, Limit. */
+enum { FE_G_VOLUME = 0, FE_G_POOL_TIME, FE_G_POOL_FB,
+       FE_G_LOCUT, FE_G_HICUT, FE_G_PWIDE, FE_G_CHAR, FE_G_GSAT, FE_G_GLUE, FE_G_LIMIT,
+       FE_G_COUNT };
+#define FE_NCHAR 13
 
 /* Voice states (fe_voice_state). */
 enum { FE_VS_EMPTY = 0, FE_VS_SEARCHING, FE_VS_READY, FE_VS_PLAYING };
@@ -84,6 +91,7 @@ void fe_refetch(fe_engine *e, int v);                        /* "fouiller encore
 void fe_freeze(fe_engine *e, int v, int on);                 /* figée: no automatic renewal */
 void fe_set(fe_engine *e, int v, int id, float value01);     /* per-voice param */
 void fe_set_global(fe_engine *e, int id, float value01);
+void fe_set_quiet(fe_engine *e, int v, int id, float value01); /* no new harvest (session load) */
 
 /* Readback (any thread). */
 float fe_get(const fe_engine *e, int v, int id);
@@ -128,6 +136,29 @@ int   fe_voice_has_next(const fe_engine *e, int v);               /* Futur: a ne
 int   fe_voice_open(const fe_engine *e, int v);                   /* held open (not closed, not in its tail) */
 /* One line on what gesture g is doing to voice v right now ("Derive 3.2 km E : ecoute..."). */
 int   fe_gesture_status(const fe_engine *e, int g, int v, char *buf, int len);
+
+/* Tape transport (like Loopex): hold -1 brakes to a stop (~3 s), +1 winds up, 0 glides back to x1.
+ * v = -1: every voice. */
+void  fe_tape_hold(fe_engine *e, int v, int hold);
+float fe_tape_speed(const fe_engine *e, int v);
+/* Defaults, for Reset / Reset All. */
+float fe_param_default(int v, int id);
+float fe_global_default(int id);
+const char *fe_char_name(int i);
+/* Clear: every sound closed and emptied (settings stay); a pad fetches again when opened. */
+void  fe_clear_all(fe_engine *e);
+
+/* Sessions (64 slots, like Loopex). Disk I/O runs on the worker thread.
+ * op: FE_SS_SAVE (state = the text to keep), FE_SS_LOAD, FE_SS_DELETE, FE_SS_SCAN.
+ * Returns 0 if refused (busy). */
+enum { FE_SS_SAVE = 1, FE_SS_LOAD = 2, FE_SS_SCAN = 4, FE_SS_DELETE = 5 };
+enum { FE_SST_IDLE = 0, FE_SST_SAVING, FE_SST_LOADING, FE_SST_OK, FE_SST_EMPTY };
+#define FE_NSLOTS 64
+int   fe_session(fe_engine *e, int op, int slot, const char *state);
+int   fe_session_status(const fe_engine *e);
+int   fe_session_names(const fe_engine *e, char *buf, int len);   /* 64 names joined by ';' ('' = empty) */
+/* After a load: the saved state text, once (NULL if none). The caller applies it. */
+const char *fe_session_take_state(fe_engine *e);
 
 /* Display string for a param value ("Plateau", "1.2 km", "120 ms"...). */
 int  fe_format(const fe_engine *e, int v, int id, float value01, char *buf, int len);

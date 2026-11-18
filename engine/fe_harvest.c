@@ -516,8 +516,11 @@ static void *worker(void *arg) {
     fe_engine *e = arg;
     int rr = 0;
     double last = 0;
+    if (e->cfg.session_dir) fe_session_scan(e);
     while (atomic_load(&e->running)) {
         if (atomic_load_explicit(&e->pending, memory_order_acquire) != -1) { msleep(20); continue; }
+        fe_session_poll(e);                                  /* sessions first: the spare is free now */
+        if (atomic_load_explicit(&e->pending, memory_order_acquire) != -1) continue;
         int vi = -1;
         for (int k = 0; k < FE_NV; k++) {
             int c = (rr + k) % FE_NV;

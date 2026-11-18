@@ -9,7 +9,7 @@
 
 #define FE_NFUT     6                  /* free tapes for Futur (a prepared next fragment) */
 #define FE_NTAPES   (2 * FE_NV + 1 + FE_NFUT)  /* current + past per voice, one spare the harvest writes into, Futur pool */
-#define FE_QSIZE    512                /* control events, power of two */
+#define FE_QSIZE    1024               /* control events, power of two */
 #define FE_WAVE_N   128                /* waveform overview bins per tape */
 
 typedef struct {
@@ -38,7 +38,28 @@ typedef struct {
 
 typedef struct { uint8_t type, v, id; float val; } fe_event;
 
-enum { EV_GATE_ON = 1, EV_GATE_OFF, EV_PRESS, EV_REFETCH, EV_FREEZE, EV_SET, EV_GSET, EV_GEST, EV_XPARAM, EV_XRESET, EV_ADOPT };
+enum { EV_GATE_ON = 1, EV_GATE_OFF, EV_PRESS, EV_REFETCH, EV_FREEZE, EV_SET, EV_GSET, EV_GEST, EV_XPARAM, EV_XRESET, EV_ADOPT,
+       EV_TAPE, EV_CLEAR, EV_SETQ };
+
+/* Output stage, ported from Loopex (see fe_master.c). */
+typedef struct { double b0, b1, b2, a1, a2, z1L, z2L, z1R, z2R; } fe_bq;
+typedef struct {
+    int    chr;                        /* voicing the coefficients belong to, -1 = none yet */
+    fe_bq  loSh, midPk, hiSh, bw[3], lo[3], hi[3];
+    double lo_f, hi_f; int lo_np, hi_np;   /* what lo[] / hi[] were set for */
+    double loOneK, hiOneK, loOneL, loOneR, hiOneL, hiOneR;
+    double eqSat, eqAsym, eqMakeup, eqBwHz;
+    int    eqBits, eqClip, eqCompand, eqPoles, eqCrush, eqCrushCnt;
+    double eqCrushHoldL, eqCrushHoldR;
+    double adaaUL, adaaUR, adaaFL, adaaFR;
+    double glueAtk, glueRel, glueKnee, glueDist, limCeil, glueThrust, thrK, thrLp, glueEnv;
+    double limEnv;
+    uint32_t dith;
+} fe_master;
+void fe_master_init(fe_master *m, double sr);
+void fe_master_block(fe_master *m, int chr, double locut, double hicut, double sr);
+void fe_master_run(fe_master *m, float *l, float *r, int n, int chr, double locut, double hicut,
+                   double gsat, double glue, double limit, double out, double sr);
 enum { ENV_OFF = 0, ENV_RISE, ENV_SUSTAIN, ENV_FALL };
 
 typedef struct {
@@ -110,6 +131,8 @@ typedef struct {
     int   t_stage, t_k, t_fam, t_wait, t_on;
     uint32_t t_rng;
     int   auto_close;                  /* Hesitation: a closed voice replayed shortly, closes itself */
+    int   tp_hold;                     /* tape transport: -1 brake, +1 wind, 0 back to x1 */
+    float tp_ls, tp_gain, tp_g0;       /* log2 speed, gain now and at the start of this block */
 
     atomic_int want;                   /* worker: 1 = harvest wanted */
     fe_request req;                    /* valid when want == 1 */
@@ -130,6 +153,7 @@ struct fe_engine {
     /* Lock-free hand-over of the spare tape */
     fe_tape *spare;                    /* worker writes it while pending == -1 */
     atomic_int pending;                /* voice that should take the spare, or -1 */
+    atomic_int pend_load;              /* the spare is a session fragment: play it, never keep it as a Futur */
 
     /* control queue (SPSC) */
     fe_event q[FE_QSIZE];
@@ -170,12 +194,25 @@ struct fe_engine {
     float  rs_lp[2], rs_hp[2], rs_ap[2], rs_amt, rs_ret;
     float  rs_ph, rs_d;                /* Ressac waves: phase, current delay (samples, glides) */
 
+    fe_master master;
+    atomic_int tp_pub[FE_NV];          /* tape speed x1000, for readers */
+
+    /* sessions: requests come from the control thread, the worker does the disk */
+    atomic_int ss_req, ss_slot, ss_status, ss_state_ready;
+    char  *ss_state;                   /* save: text to write; load: text read back */
+    int    ss_state_cap;
+    char   ss_names[FE_NSLOTS + 1][24];
+
     float *scratch_l, *scratch_r;      /* render mix, max_block */
     float *dec;                        /* worker: decoded float stereo at source rate */
     int    dec_cap;
     uint8_t *net_buf;                  /* worker: download buffer */
     int    net_cap;
 };
+
+/* fe_session.c (worker thread) */
+void fe_session_poll(fe_engine *e);
+void fe_session_scan(fe_engine *e);
 
 /* fe_harvest.c */
 int  fe_harvest_start(fe_engine *e);

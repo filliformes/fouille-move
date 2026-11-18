@@ -22,7 +22,7 @@ docker build -q -t "$IMAGE" -f scripts/Dockerfile . >/dev/null
 echo "[2/4] compile + offline tests"
 CID=$(MSYS_NO_PATHCONV=1 docker create "$IMAGE" bash -c '
   set -e
-  E="engine/fe_engine.c engine/fe_harvest.c engine/fe_atlas.c"
+  E="engine/fe_engine.c engine/fe_harvest.c engine/fe_atlas.c engine/fe_master.c engine/fe_session.c"
   W="-Wall -Wextra -Wno-unused-parameter -Wno-sign-compare"
   O="-O3 -ffast-math -fno-finite-math-only -std=gnu11"
   mkdir -p dist/fouille dist/tests

@@ -11,9 +11,14 @@
  * = intensite ; Shift + pad = verrouiller / deverrouiller (Shift + Futur = adopter
  * le fragment prepare) ; Undo + pad = reglages par defaut ; knobs 5-8 = reglages
  * du geste tenu.
- * Boutons de pas = choisir la voix. Gauche / Droite = page de reglages.
- * Molette = vue (Voix, Carte, Credits). Knobs 1-8 = la page de la voix choisie.
- * Back = suspendre (les voix continuent).
+ * Boutons de pas = choisir le son ; re-presser le meme = page suivante (Lieu, Geste,
+ * Matiere, Espace). Gauche / Droite tenus = tape stop / tape wind (comme Loopex), sur
+ * tous les sons ; Shift + fleche = le son choisi seulement.
+ * Boutons Track : 1 Carte, 2 Espace commun, 3 Gestes, 4 Output (celle de Loopex).
+ * Menu (trois lignes) = Sessions, comme Loopex (64 slots, popups K5 NON / K8 OUI).
+ * Molette = vue (Voix, Carte, Credits) ; dans Carte, le lieu du son choisi.
+ * Knobs 1-8 = la page de la voix choisie, ou le menu ouvert.
+ * Back = ferme le menu ouvert, sinon suspend (les voix continuent).
  */
 
 import {
@@ -25,6 +30,7 @@ import {
 import * as C from '/data/UserData/schwung/shared/constants.mjs';
 import { setLED, setButtonLED, decodeDelta } from '/data/UserData/schwung/shared/input_filter.mjs';
 function col(name, fb) { return (C[name] !== undefined) ? C[name] : fb; }
+const ROW_CCS = [C.MoveRow1, C.MoveRow2, C.MoveRow3, C.MoveRow4];   /* Track buttons 1..4 */
 /* Right pads: one colour per row (per idea), like Loopex; touched or latched = White. */
 const ROW_COLORS = [col('AzureBlue', 125), col('NeonPink', 21), col('Purple', 104), col('VividYellow', 7)];
 const FuturReady = col('BrightOrange', 3);                  /* a playing voice with a next fragment prepared */
@@ -43,7 +49,8 @@ const P = { PLACE: 0, SOURCE: 1, RADIUS: 2, FLOW: 3, RISE: 4, HOLD: 5, FALL: 6, 
             SCATTER: 8, START: 9, LENGTH: 10, DIR: 11, SPEED: 12, GRAIN: 13, LOCK: 14, WEAR: 15,
             DRIFT: 16, TONE: 17, DRIVE: 18, PAN: 19, WIDTH: 20, POOL: 21, VOLUME: 22,
             LOCUT: 23, HICUT: 24 };
-const G = { VOLUME: 0, POOL_TIME: 1, POOL_FB: 2 };
+const G = { VOLUME: 0, POOL_TIME: 1, POOL_FB: 2, LOCUT: 3, HICUT: 4, PWIDE: 5, CHAR: 6, GSAT: 7, GLUE: 8, LIMIT: 9 };
+const NG = 10;
 let NPLACES = 20;
 function steps(id) { return id === P.PLACE ? NPLACES : (id === P.SOURCE || id === P.HOLD) ? 3 : id === P.DIR ? 2 : 0; }
 
@@ -55,7 +62,7 @@ const PAGES = [
     { name: 'Matiere', k: [[P.SPEED, 'Vitesse'], [P.GRAIN, 'Grain'], [P.LOCK, 'Lock'], [P.WEAR, 'Usure'],
                            [P.DRIFT, 'Derive'], [P.TONE, 'Ton'], [P.DRIVE, 'Saturation'], null] },
     { name: 'Espace',  k: [[P.PAN, 'Pan'], [P.WIDTH, 'Largeur'], [P.POOL, 'Envoi pool'], null,
-                           [-1 - G.POOL_TIME, 'Pool temps'], [-1 - G.POOL_FB, 'Pool retour'], [-1 - G.VOLUME, 'Master'],
+                           [-1 - G.POOL_TIME, 'Pool temps'], [-1 - G.POOL_FB, 'Pool retour'], [-1 - G.VOLUME, 'Out'],
                            [P.VOLUME, 'Volume']] },
 ];
 const VIEWS = ['Voix', 'Carte', 'Credits'];
@@ -117,7 +124,7 @@ function pollStatus() {
     statusTxt = t || '';
 }
 let pv = [];                                /* params of the selected voice */
-let gv = [0.6, 0.6, 0.45];
+let gv = [2 / 3, 0.6, 0.45, 0, 1, 0.5, 1 / 12, 0, 0, 0];
 let card = null, wave = '', pos = 0, net = '';
 let places = [];
 let overlay = null, overlayUntil = 0;       /* {lbl, txt} */
@@ -192,8 +199,9 @@ function paintAll(force) {
         if (force) { setLED(MoveSteps[i], i === sel ? White : Black, true); }
         else enq(MoveSteps[i], i === sel ? White : Black);
     }
-    setButtonLED(MoveLeft, page > 0 ? WhiteLedBright : WhiteLedDim, true);
-    setButtonLED(MoveRight, page < PAGES.length - 1 ? WhiteLedBright : WhiteLedDim, true);
+    setButtonLED(MoveLeft, tapeHeld[0] ? WhiteLedBright : WhiteLedDim, true);
+    setButtonLED(MoveRight, tapeHeld[1] ? WhiteLedBright : WhiteLedDim, true);
+    paintTrackLEDs();
     setButtonLED(MoveShift, shift ? WhiteLedBright : WhiteLedDim, true);
     setButtonLED(MoveBack, WhiteLedDim, true);
 }
@@ -201,6 +209,38 @@ function clearAll() {
     for (let i = 0; i < NV; i++) { setLED(LEFT[i], Black, true); setLED(RIGHT[i], Black, true); setLED(MoveSteps[i], Black, true); }
     for (const b of [MoveLeft, MoveRight, MoveShift, MoveBack, MoveUp, MoveDown, MoveCopy, MoveMenu, MoveUndo, MoveCapture])
         setButtonLED(b, WhiteLedOff, true);
+    for (let i = 0; i < 4; i++) if (ROW_CCS[i] !== undefined) setButtonLED(ROW_CCS[i], WhiteLedOff, true);
+}
+const tapeHeld = [0, 0];                                   /* scope while held: 0 = not held, -1 = all, 1 + v = that sound */
+function tapeKey(i, on) {                                   /* Left (0) brakes to a stop, Right (1) winds up; Shift = the selected sound */
+    if (on) {
+        const scope = shift ? sel : -1;
+        tapeHeld[i] = scope < 0 ? -1 : 1 + scope;
+        spB('th', scope + ',' + (i === 0 ? -1 : 1));
+        say((i === 0 ? 'tape stop' : 'tape wind') + (scope >= 0 ? ' : son ' + (scope + 1) : ''), 900);
+    } else if (tapeHeld[i]) {
+        const scope = tapeHeld[i] < 0 ? -1 : tapeHeld[i] - 1;
+        tapeHeld[i] = 0;
+        const other = tapeHeld[1 - i];                       /* the other arrow, still held on the same scope, takes over */
+        if (other && (other < 0 ? -1 : other - 1) === scope) spB('th', scope + ',' + (i === 0 ? 1 : -1));
+        else spB('th', scope + ',0');
+        say('tape back', 700);
+    }
+    setButtonLED(i === 0 ? MoveLeft : MoveRight, tapeHeld[i] ? WhiteLedBright : WhiteLedDim, true);
+}
+function stepPress(i) {                                     /* a step button: that sound; the same again = next page */
+    if (menu >= 0 && (menu !== 0 || i === sel)) {          /* leaving a menu for the sound (Carte follows another sound) */
+        if (i !== sel) selectVoice(i);
+        menu = -1; cancelPopups(); paintTrackLEDs(); showPage(); return;
+    }
+    if (i === sel && menu < 0) { page = (page + 1) % PAGES.length; acc.fill(0); showPage(); return; }
+    selectVoice(i);
+    if (menu === 0) { refreshVals(); return; }
+    showPage();
+}
+function showPage() {
+    overlay = { title: 'son ' + (sel + 1), lbl: PAGES[page].name, txt: PAGES[page].k.map(d => d ? d[1].substring(0, 4) : '-').join(' ') };
+    overlayUntil = now() + 1500;
 }
 
 /* ---- DSP readback ---- */
@@ -258,6 +298,7 @@ function selectVoice(i) {
     sel = i;
     enq(MoveSteps[sel], White);
     loadParams(); loadCard();
+    if (menu >= 0) refreshVals();
 }
 
 /* ---- knobs ---- */
@@ -268,7 +309,7 @@ function showKnob(k) {
     if (!d) { overlay = { lbl: '-', txt: '' }; overlayUntil = now() + 800; return; }
     const v = knobValue(d);
     let txt;
-    if (d[0] < 0) txt = Math.round(v * 100) + '%';
+    if (d[0] < 0) txt = gFmt(-1 - d[0], v);
     else txt = gp('fmt:' + sel + ',' + d[0] + ',' + (v || 0).toFixed(4)) || (v || 0).toFixed(2);
     overlay = { lbl: d[1], txt: txt };
     overlayUntil = now() + 1500;
@@ -304,6 +345,8 @@ function turnKnob(k, delta) {
     if (!d) return;
     if (d[0] < 0) {                                    /* global */
         const gi = -1 - d[0];
+        const gd = GDEF[gi];
+        if (gd) { turnGlobal(gi, gd, k, delta); showKnob(k); return; }
         gv[gi] = clamp(gv[gi] + delta * (shift ? 0.002 : 0.01));
         queue('g' + gi, 'gp', gi + ',' + gv[gi].toFixed(4));
     } else {
@@ -321,6 +364,244 @@ function turnKnob(k, delta) {
         queue('p' + id, 'p', sel + ',' + id + ',' + v.toFixed(4));
     }
     showKnob(k);
+}
+
+
+/* ---- globals in real units (the Output page is Loopex's: same ranges, same steps) ---- */
+const CHAR_NAMES = ['Off', '962', 'Air', 'SSL', 'Neve', 'Trident', 'Studer', 'API', 'Ampex', 'MPC', 'S950', 'SP12', 'Emu'];
+const GDEF = {
+    [G.VOLUME]: { lo: 0, hi: 1.5 },
+    [G.LOCUT]: { lo: 20, hi: 1000, int: true, step: 5 },
+    [G.HICUT]: { lo: 1000, hi: 20000, int: true, step: 100 },
+    [G.PWIDE]: { lo: 0, hi: 1 },
+    [G.CHAR]: { opts: CHAR_NAMES },
+    [G.GSAT]: { lo: 0, hi: 2 },
+    [G.GLUE]: { lo: 0, hi: 1 },
+    [G.LIMIT]: { lo: 0, hi: 1 },
+};
+function gReal(gi) {
+    const d = GDEF[gi], v = gv[gi] || 0;
+    if (!d) return v;
+    if (d.opts) return Math.round(v * (d.opts.length - 1));
+    return d.lo + (d.hi - d.lo) * v;
+}
+function gFmt(gi, v) {
+    const d = GDEF[gi];
+    if (gi === G.POOL_TIME) { const t = 0.08 * Math.pow(25, v); return t < 1 ? Math.round(t * 1000) + ' ms' : t.toFixed(2) + ' s'; }
+    if (!d) return Math.round(v * 100) + '%';
+    if (d.opts) return d.opts[Math.round(v * (d.opts.length - 1))] || '';
+    const r = d.lo + (d.hi - d.lo) * v;
+    if (gi === G.VOLUME) return 'x' + r.toFixed(2);
+    return (d.hi - d.lo > 4) ? String(Math.round(r)) : r.toFixed(2);
+}
+const enumAcc = new Array(8).fill(0);
+function enumSteps(k, delta) {                         /* Loopex: one step per 4 detents */
+    enumAcc[k] += delta;
+    const st = Math.trunc(enumAcc[k] / 4);
+    if (st !== 0) enumAcc[k] -= st * 4;
+    return st;
+}
+function turnGlobal(gi, d, k, delta) {
+    if (d.opts) {
+        const st = enumSteps(k, delta); if (st === 0) return;
+        const n = d.opts.length, ix = Math.max(0, Math.min(n - 1, Math.round(gv[gi] * (n - 1)) + st));
+        gv[gi] = ix / (n - 1);
+    } else {
+        const step = d.step || (d.hi - d.lo) * 0.006;   /* fine + continuous, like Loopex */
+        let r = gReal(gi) + delta * step;
+        r = Math.max(d.lo, Math.min(d.hi, r));
+        if (d.int) r = Math.round(r);
+        gv[gi] = (r - d.lo) / (d.hi - d.lo);
+    }
+    queue('g' + gi, 'gp', gi + ',' + gv[gi].toFixed(5));
+}
+
+/* ---- menus: the Track buttons (0-3) and Sessions (5, the Menu button) ---- */
+const MENU_NAMES = ['Carte', 'Espace commun', 'Gestes', 'Output', '', 'Sessions'];
+const X_RESSAC = 9;
+let menu = -1, lastG = -1;
+function menuDefs() {
+    switch (menu) {
+    case 0: return [{ p: P.PLACE, lbl: 'Lieu' }, { p: P.SOURCE, lbl: 'Source' }, { p: P.RADIUS, lbl: 'Rayon' }, { p: P.FLOW, lbl: 'Flux' },
+                    { p: P.LOCUT, lbl: 'C.bas' }, { p: P.HICUT, lbl: 'C.haut' }, { p: P.SPEED, lbl: 'Vit.' }, { p: P.VOLUME, lbl: 'Vol.' }];
+    case 1: return [{ g: G.POOL_TIME, lbl: 'Pool' }, { g: G.POOL_FB, lbl: 'Retour' }, { xa: X_RESSAC, lbl: 'Ressac' }, { g: G.VOLUME, lbl: 'Out' },
+                    { xs: [X_RESSAC, 0] }, { xs: [X_RESSAC, 1] }, { xs: [X_RESSAC, 2] }, { xs: [X_RESSAC, 3] }];
+    case 2: return lastG < 0 ? [null, null, null, null, null, null, null, null]
+                             : [{ xa: lastG, lbl: 'Quant.' }, null, null, null, { xs: [lastG, 0] }, { xs: [lastG, 1] }, { xs: [lastG, 2] }, { xs: [lastG, 3] }];
+    case 3: return [{ g: G.VOLUME, lbl: 'Out' }, { g: G.LOCUT, lbl: 'LoCut' }, { g: G.HICUT, lbl: 'HiCut' }, { g: G.PWIDE, lbl: 'PWide' },
+                    { g: G.CHAR, lbl: 'Char' }, { g: G.GSAT, lbl: 'gSat' }, { g: G.GLUE, lbl: 'Glue' }, { g: G.LIMIT, lbl: 'Limit' }];
+    case 5: return [{ local: true, lbl: 'Slot' }, { trig: 'save', lbl: 'Save' }, { trig: 'load', lbl: 'Load' }, { trig: 'delete', lbl: 'Del' },
+                    { trig: 'clear', lbl: 'Clear' }, { trig: 'reset', lbl: 'Reset' }, { trig: 'resetAll', lbl: 'RstAll' }, null];
+    }
+    return null;
+}
+const FULL = { [G.VOLUME]: 'Master Volume', [G.LOCUT]: 'Master Lo Cut', [G.HICUT]: 'Master Hi Cut', [G.PWIDE]: 'Width (returns)',
+               [G.CHAR]: 'Character', [G.GSAT]: 'Global Sat', [G.GLUE]: 'Glue Comp', [G.LIMIT]: 'Tape Limiter',
+               [G.POOL_TIME]: 'Pool temps', [G.POOL_FB]: 'Pool retour' };
+const TRIG_FULL = { save: 'Save Session', load: 'Load Session', delete: 'Delete Session', clear: 'Clear All Sounds', reset: 'Reset Current Pad', resetAll: 'Reset All Pads' };
+function defLabel(d) {
+    if (!d) return '-';
+    if (d.xs) return (X_KNOBS[d.xs[0]] || ['-', '-', '-', '-'])[d.xs[1]].substring(0, 5);
+    return d.lbl;
+}
+function defFull(d) {
+    if (!d) return '';
+    if (d.xs) return X_NAMES[d.xs[0]] + ' > ' + (X_KNOBS[d.xs[0]] || [])[d.xs[1]];
+    if (d.xa !== undefined) return X_NAMES[d.xa] + ' (tous)';
+    if (d.g !== undefined) return FULL[d.g] || d.lbl;
+    if (d.local) return 'Session Slot';
+    if (d.trig) return TRIG_FULL[d.trig];
+    const pg = PAGES.map(x => x.k).flat().find(x => x && x[0] === d.p);
+    return pg ? pg[1] : d.lbl;
+}
+function defNorm(d) {                                  /* 0..1 for the little bar, -1 = none */
+    if (!d) return -1;
+    if (d.p !== undefined) return pv[d.p] || 0;
+    if (d.g !== undefined) return GDEF[d.g] && GDEF[d.g].opts ? -1 : (gv[d.g] || 0);
+    if (d.xa !== undefined) return gLatch[d.xa] || 0;
+    if (d.xs) return loadXp(d.xs[0])[d.xs[1]] || 0;
+    return -1;
+}
+function defValue(d) {
+    if (!d) return '';
+    if (d.p !== undefined) return gp('fmt:' + sel + ',' + d.p + ',' + (pv[d.p] || 0).toFixed(4)) || '';
+    if (d.g !== undefined) return gFmt(d.g, gv[d.g] || 0);
+    if (d.xa !== undefined) return gLatch[d.xa] > 0 ? Math.round(gLatch[d.xa] * 100) + '%' : 'off';
+    if (d.xs) { const v = loadXp(d.xs[0])[d.xs[1]]; return gp('xfmt:' + d.xs[0] + ',' + d.xs[1] + ',' + (v || 0).toFixed(4)) || Math.round(v * 100) + '%'; }
+    if (d.local) return String(sessSlot);
+    if (d.trig) return '';
+    return '';
+}
+const valCache = new Array(8).fill('');                /* readbacks for the grid, refreshed a few times a second */
+function refreshVals() { const defs = menuDefs() || []; for (let i = 0; i < 8; i++) valCache[i] = defValue(defs[i]); }
+let lastKnob = -1, lastKnobAt = 0;
+const trigAt = new Array(8).fill(0);
+function openMenu(idx) {
+    cancelPopups();
+    if (menu === idx) menu = -1;                       /* the same button again closes it */
+    else { menu = idx; if (idx === 5) { sp('session', 'scan'); sessPollNames = 6; } loadParams(); }
+    lastKnob = -1; enumAcc.fill(0); refreshVals(); overlayUntil = 0;
+    if (menu >= 0) say(MENU_NAMES[menu], 900);
+    paintTrackLEDs();
+}
+function paintTrackLEDs() {
+    for (let i = 0; i < 4; i++) if (ROW_CCS[i] !== undefined) setButtonLED(ROW_CCS[i], menu === i ? WhiteLedBright : WhiteLedDim, true);
+    setButtonLED(MoveMenu, menu === 5 ? WhiteLedBright : WhiteLedDim, true);
+}
+
+/* ---- sessions (Loopex) ---- */
+const NSLOTS = 64;
+let reloadIn = 0;
+let sessSlot = 1, sessCurrent = 0, sessPending = '', sessPendSlot = 0, sessLast = '', sessPollNames = 0;
+let sessNames = new Array(NSLOTS + 1).fill('');
+let confirmSave = false, confirmDelete = false, confirmWipe = false, confirmReset = false, confirmResetAll = false;
+let popupWas = false, popupGuardUntil = 0;
+const MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function prettySess(nm) {
+    const m = /^(\d+)_(\d{4})(\d{2})(\d{2})_(\d{2})(\d{2})$/.exec(String(nm || ''));
+    if (!m) return nm || '';
+    return (MONTHS[parseInt(m[3], 10) - 1] || m[3]) + ' ' + parseInt(m[4], 10) + ' ' + m[5] + ':' + m[6];
+}
+function pollSessNames() {
+    const r = gp('sessNames'); if (r === null || r === undefined) return;
+    const parts = String(r).split(';');
+    for (let i = 1; i <= NSLOTS; i++) sessNames[i] = parts[i - 1] || '';
+}
+function anyPopup() { return confirmSave || confirmDelete || confirmWipe || confirmReset || confirmResetAll; }
+function cancelPopups() { confirmSave = confirmDelete = confirmWipe = confirmReset = confirmResetAll = false; }
+function popupTitle() {
+    return confirmResetAll ? 'RESET ALL PADS?' : confirmReset ? 'RESET PAD ' + (sel + 1) + '?' : confirmWipe ? 'CLEAR ALL SOUNDS?'
+         : confirmDelete ? 'DELETE SLOT ' + sessSlot + '?' : 'OVERWRITE SLOT ' + sessSlot + '?';
+}
+function doSessionSave() { sp('session', 'save:' + sessSlot); say('Saving slot ' + sessSlot, 3000); confirmSave = false; sessPending = 'save'; sessPendSlot = sessSlot; sessLast = ''; }
+function doSessionDelete() { sp('session', 'delete:' + sessSlot); say('Deleting slot ' + sessSlot, 3000); confirmDelete = false; sessPending = 'delete'; sessPendSlot = sessSlot; sessLast = ''; }
+function afterReload() { delete_xpv(); loadParams(); loadCard(); pollStates(); loadLatches(); refreshVals(); paintAll(true); }
+function delete_xpv() { for (const k of Object.keys(xpv)) delete xpv[k]; }
+function loadLatches() {                               /* latched gestures, as the engine has them now */
+    const r = gp('lat'); if (!r) return;
+    gLatch.fill(0); for (let v = 0; v < NV; v++) vLatch[v].fill(0);
+    for (const it of String(r).split(',')) {
+        const m = /^(-?\d+)\.(\d+)=([\d.]+)$/.exec(it); if (!m) continue;
+        const v = parseInt(m[1]), g = parseInt(m[2]), a = parseFloat(m[3]);
+        if (g < 0 || g >= XN) continue;
+        if (v < 0) gLatch[g] = a; else if (v < NV) vLatch[v][g] = a;
+    }
+}
+function pollSession() {
+    const st = gp('sessStatus');
+    if (st === null || st === undefined || st === sessLast) return;
+    sessLast = st;
+    if (st === 'OK') {
+        pollSessNames();
+        if (sessPending === 'save') { sessCurrent = sessPendSlot; say('Saved !'); }
+        else if (sessPending === 'load') { sessCurrent = sessPendSlot; say('Loaded session ' + sessPendSlot); afterReload(); reloadIn = 10; }
+        else if (sessPending === 'delete') { if (sessCurrent === sessPendSlot) sessCurrent = 0; say('Deleted slot ' + sessPendSlot); }
+        sessPending = '';
+    } else if (st === 'Empty') { say('Slot ' + sessPendSlot + ' is empty'); sessPending = ''; }
+    else if (st) say(st, 3000);
+}
+function menuKnob(k, delta) {
+    { const pop = anyPopup(); if (pop !== popupWas) { popupWas = pop; popupGuardUntil = now() + 400; enumAcc.fill(0); } }
+    if (now() < popupGuardUntil) { popupGuardUntil = now() + 400; enumAcc.fill(0); return; }
+    if (anyPopup()) {                                  /* popup: K8 = YES, K5 = NO */
+        if (delta === 0) return;
+        if (k === 7) {
+            if (confirmWipe) { confirmWipe = false; spB('clearAll', '1'); sessCurrent = 0;
+                               for (let i = 0; i < NV; i++) { latched[i] = false; closing[i] = false; closeAt[i] = 0; openE[i] = false; }
+                               say('All sounds cleared'); paintAll(true); }
+            else if (confirmReset) { confirmReset = false; spB('resetSel', String(sel)); loadParams(); say('Pad ' + (sel + 1) + ' reset'); }
+            else if (confirmResetAll) { confirmResetAll = false; spB('resetAll', '1'); loadParams(); say('All pads reset'); }
+            else if (confirmDelete) doSessionDelete();
+            else doSessionSave();
+        } else if (k === 4) { cancelPopups(); say('cancelled'); }
+        if (!anyPopup()) { popupWas = false; popupGuardUntil = now() + 400; enumAcc.fill(0); }
+        return;
+    }
+    const defs = menuDefs(); const d = defs && defs[k];
+    lastKnob = k; lastKnobAt = now();
+    if (!d) return;
+    if (d.local) { const st = enumSteps(k, delta); if (st === 0) return; sessSlot = Math.max(1, Math.min(NSLOTS, sessSlot + st)); valCache[k] = String(sessSlot); return; }
+    if (d.trig) {
+        if (delta === 0) return;
+        const t = now(); if (trigAt[k] && t - trigAt[k] < 400) return; trigAt[k] = t;
+        if (d.trig === 'save') { if (sessNames[sessSlot]) { confirmSave = true; say('slot ' + sessSlot + ' exists'); } else doSessionSave(); }
+        else if (d.trig === 'load') { sp('session', 'load:' + sessSlot); say('Loading slot ' + sessSlot, 3000); sessPending = 'load'; sessPendSlot = sessSlot; sessLast = ''; }
+        else if (d.trig === 'delete') { if (sessNames[sessSlot]) { confirmDelete = true; say('delete slot ' + sessSlot + '?'); } else say('slot ' + sessSlot + ' empty'); }
+        else if (d.trig === 'clear') { confirmWipe = true; say('clear all sounds?'); }
+        else if (d.trig === 'reset') { confirmReset = true; say('reset pad ' + (sel + 1) + '?'); }
+        else if (d.trig === 'resetAll') { confirmResetAll = true; say('reset all pads?'); }
+        if (anyPopup()) { popupWas = true; popupGuardUntil = now() + 400; enumAcc.fill(0); }
+        return;
+    }
+    if (d.p !== undefined) {
+        const id = d.p, n = steps(id);
+        let v = pv[id] || 0;
+        if (n > 0) { const st = enumSteps(k, delta); if (st === 0) return; v = Math.max(0, Math.min(n - 1, Math.round(v * (n - 1)) + st)) / (n - 1); }
+        else v = clamp(v + delta * (shift ? 0.002 : 0.01));
+        pv[id] = v; if (id === P.PLACE) pvCache[sel] = v;
+        queue('p' + id, 'p', sel + ',' + id + ',' + v.toFixed(4));
+    } else if (d.g !== undefined) {
+        if (GDEF[d.g]) turnGlobal(d.g, GDEF[d.g], k, delta);
+        else { gv[d.g] = clamp(gv[d.g] + delta * (shift ? 0.002 : 0.01)); queue('g' + d.g, 'gp', d.g + ',' + gv[d.g].toFixed(4)); }
+    } else if (d.xa !== undefined) {                   /* a gesture's amount for every sound, latched */
+        const a = clamp((gLatch[d.xa] || 0) + delta * 0.01);
+        gLatch[d.xa] = a < 0.005 ? 0 : a;
+        queueX(-1, d.xa, gLatch[d.xa]);
+        paintRight(false);
+    } else if (d.xs) {
+        const a = loadXp(d.xs[0]);
+        a[d.xs[1]] = clamp((a[d.xs[1]] || 0) + delta * (shift ? 0.002 : 0.01));
+        queue('xp' + d.xs[0] + '_' + d.xs[1], 'xp', d.xs[0] + ',' + d.xs[1] + ',' + a[d.xs[1]].toFixed(4));
+    }
+    valCache[k] = defValue(d);
+}
+function jogPlace(dd) {                                /* Carte: the jog walks the selected sound through the atlas */
+    const n = NPLACES, cur = Math.round((pv[P.PLACE] || 0) * (n - 1));
+    const nx = Math.max(0, Math.min(n - 1, cur + (dd > 0 ? 1 : -1)));
+    if (nx === cur) return;
+    pv[P.PLACE] = nx / (n - 1); pvCache[sel] = pv[P.PLACE];
+    queue('p' + P.PLACE, 'p', sel + ',' + P.PLACE + ',' + pv[P.PLACE].toFixed(4));
+    lastKnob = 0; lastKnobAt = now(); valCache[0] = defValue(menuDefs()[0]);
 }
 
 /* ---- left pads: the sounds ---- */
@@ -407,6 +688,7 @@ function rightDown(i, vel) {
         return;
     }
     if (!xready[g]) { say(X_NAMES[g] + ' : a venir'); return; }
+    lastG = g; if (menu === 2) refreshVals();
     let voices = heldLeft();
     for (const v of voices) leftUsed[v] = true;
     if (!voices.length) voices = null;
@@ -455,6 +737,7 @@ function rightUp(i) {
         sendX(-1, h.g, gLatch[h.g] || 0);
     }
     if (latch) say(X_NAMES[h.g] + ' verrouille', 1000);
+    if (menu === 1 || menu === 2) refreshVals();
     if (statusG === h.g) statusUntil = now() + (latch ? 4000 : (STATUS_LINGER[h.g] || 1200));
     paintRight(false, true);
 }
@@ -528,9 +811,9 @@ function drawBottom() {
         text(0, 52, fit((card.author || card.kind) + ' ' + (card.lic || ''), 21));
     } else text(0, 47, 'page ' + PAGES[page].name);
 }
-function drawMap() {
+function drawMap(inMenu) {
     /* Montreal: lat 45.44..45.57, lon -73.69..-73.53 */
-    const la0 = 45.44, la1 = 45.57, lo0 = -73.69, lo1 = -73.53, y0 = 14, h = 40;
+    const la0 = 45.44, la1 = 45.57, lo0 = -73.69, lo1 = -73.53, y0 = inMenu ? 12 : 14, h = inMenu ? 40 : 40;
     draw_rect(0, y0 - 1, W, h + 2, 1);
     const used = {};
     for (let i = 0; i < NV; i++) if (st[i] > 0) used[Math.round((pvCache[i] || 0) * (NPLACES - 1))] = st[i];
@@ -546,6 +829,12 @@ function drawMap() {
     }
     const nm = places[selPlace] ? places[selPlace].name : '';
     const inMtl = places[selPlace] && places[selPlace].lat > la0 && places[selPlace].lat < la1 && places[selPlace].lon > lo0;
+    if (inMenu) {
+        const t = (lastKnob >= 0 && now() - lastKnobAt < 2500) ? defLabel(menuDefs()[lastKnob]) + ' ' + (valCache[lastKnob] || '')
+                : (inMtl ? '' : 'hors carte ') + (valCache[1] || '') + ' ' + (valCache[2] || '');
+        text(0, 56, fit(msg && now() < msgUntil ? msg : t, 21));
+        return;
+    }
     text(0, 56, fit(inMtl ? nm : nm + ' (hors carte)', 21));
 }
 const pvCache = new Array(NV).fill(0);               /* each voice's place, for the map */
@@ -557,8 +846,75 @@ function drawCredits() {
     text(0, 42, fit(card.author, 21));
     text(0, 52, fit(card.lic + ' ' + card.secs + 's', 21));
 }
+
+/* ---- menu screen: a header, eight cells (two rows of four), a footer ---- */
+function textInv(x, y, s) { print(x, y, s, 0); }
+function drawCells(defs, y0) {
+    for (let i = 0; i < 8; i++) {
+        const d = defs[i], cx = (i % 4) * 32, cy = y0 + (i < 4 ? 0 : 20);
+        if (!d) { text(cx + 1, cy, '-'); continue; }
+        const touched = i === lastKnob && now() - lastKnobAt < 2500;
+        if (touched) draw_rect(cx, cy - 1, 32, 19, 1);
+        text(cx + 1, cy, fit(defLabel(d), 5));
+        text(cx + 1, cy + 8, fit(valCache[i] || '', 5));
+        const nv = defNorm(d);
+        if (nv >= 0) fill_rect(cx + 1, cy + 16, Math.max(1, Math.round(29 * nv)), 1, 1);
+    }
+}
+function drawHeaderBar(l, r, inv) {
+    if (inv) { fill_rect(0, 0, W, 9, 1); textInv(0, 0, fit(l, 21 - (r ? r.length + 1 : 0))); if (r) textInv(W - r.length * 6, 0, r); }
+    else { text(0, 0, fit(l, 21 - (r ? r.length + 1 : 0))); if (r) text(W - r.length * 6, 0, r); fill_rect(0, 9, W, 1, 1); }
+}
+function drawMenu() {
+    const defs = menuDefs() || [];
+    if (anyPopup()) {                                  /* confirm popup: two buttons, K5 NO and K8 YES */
+        drawHeaderBar(popupTitle(), '', true);
+        if (confirmSave || confirmDelete) text(0, 14, fit(prettySess(sessNames[sessSlot] || ''), 21));
+        draw_rect(0, 30, 32, 16, 1); text(7, 34, 'NO');
+        fill_rect(96, 30, 32, 16, 1); textInv(102, 34, 'YES');
+        text(0, 54, 'K5 non       K8 oui');
+        return;
+    }
+    const touched = lastKnob >= 0 && now() - lastKnobAt < 2500 && defs[lastKnob];
+    if (overlay && now() < overlayUntil && overlay.title && heldGesture() >= 0) drawHeaderBar(overlay.title + ' > ' + overlay.lbl, fit(overlay.txt, 8), true);   /* a held gesture's knob */
+    else if (touched) drawHeaderBar(defFull(defs[lastKnob]), fit(valCache[lastKnob] || '', 9), true);
+    else if (menu === 5) drawHeaderBar('Sessions', sessCurrent > 0 ? 'Session ' + sessCurrent : 'New', false);
+    else if (menu === 0) drawHeaderBar('Carte ' + (sel + 1), fit(places[Math.round((pv[P.PLACE] || 0) * (NPLACES - 1))] ? places[Math.round((pv[P.PLACE] || 0) * (NPLACES - 1))].name : '', 12), false);
+    else if (menu === 2) drawHeaderBar('Gestes', lastG >= 0 ? fit(X_NAMES[lastG], 12) : '', false);
+    else drawHeaderBar(MENU_NAMES[menu], '', false);
+    if (menu === 0) { drawMap(true); return; }
+    if (menu === 2) { drawGestures(defs); return; }
+    drawCells(defs, 13);
+    let foot;
+    if (msg && now() < msgUntil) foot = msg;
+    else if (menu === 5) foot = sessSlot + (sessSlot === sessCurrent ? '*' : '') + ' ' + (sessNames[sessSlot] ? prettySess(sessNames[sessSlot]) : 'empty');
+    else foot = 'Back : fermer';
+    text(0, 55, fit(foot, 21));
+}
+function latchedList() {                               /* "Gel : tous", "Ressac : 1,3" */
+    const out = [];
+    for (let g = 0; g < XN; g++) {
+        const vs = []; for (let v = 0; v < NV; v++) if (vLatch[v][g] > 0) vs.push(v + 1);
+        if (gLatch[g] > 0) out.push([g, X_NAMES[g] + ' : tous' + (vs.length ? '+' + vs.join(',') : '')]);
+        else if (vs.length) out.push([g, X_NAMES[g] + ' : ' + vs.join(',')]);
+    }
+    return out;
+}
+function drawGestures(defs) {
+    const L = latchedList();
+    if (lastKnob >= 4 && now() - lastKnobAt < 2500 || lastG < 0) {
+        if (lastG < 0) { text(0, 14, 'touche un geste :'); text(0, 24, 'ses reglages iront'); text(0, 34, 'sur les knobs 5-8'); }
+        else drawCells(defs, 13);
+    } else {
+        if (!L.length) text(0, 14, 'aucun geste verrouille');
+        for (let i = 0; i < Math.min(4, L.length); i++) text(0, 13 + i * 10, fit((L[i][0] === lastG ? '>' : ' ') + L[i][1], 21));
+        if (L.length > 4) text(110, 43, '+' + (L.length - 4));
+    }
+    if (lastG >= 0) text(0, 55, fit('k1 quant. ' + (valCache[0] || '') + ' k5-8 regl.', 21));
+}
 function draw() {
     clear_screen();
+    if (menu >= 0) { drawMenu(); host_flush_display(); return; }
     drawHeader();
     drawStrip();
     if (view === 0) { drawWave(); drawBottom(); }
@@ -576,12 +932,13 @@ globalThis.init = function () {
     loadReady();
     loadPlaces();
     pollStates();
-    loadParams(); loadCard();
+    loadParams(); loadCard(); loadLatches();
+    pollSessNames();
     paintAll(true);
     say('Fouille : 16 voix ecoutent', 2500);
 };
 globalThis.onUnload = function () { clearAll(); };
-globalThis.onResume = function () { loadReady(); pollStates(); loadParams(); loadCard(); paintAll(true); resume = 2; };
+globalThis.onResume = function () { loadReady(); pollStates(); loadParams(); loadCard(); loadLatches(); paintAll(true); resume = 2; };
 let resume = 0;
 
 globalThis.tick = function () {
@@ -593,6 +950,10 @@ globalThis.tick = function () {
     if (tickN % 45 === 11) loadCard();
     if (view === 1 && tickN % 30 === 3) for (let i = 0; i < NV; i++) { const s = gp('pv:' + i); if (s) pvCache[i] = parseFloat(s.split(',')[0]); }
     if (resume > 0 && tickN % 8 === 0) { resume--; paintAll(true); }
+    if ((menu === 5 || sessPending) && tickN % 4 === 0) pollSession();
+    if (reloadIn > 0 && --reloadIn === 0) afterReload();   /* the loaded settings reach the engine a block later */
+    if (sessPollNames > 0 && tickN % 5 === 0) { sessPollNames--; pollSessNames(); }
+    if (menu >= 0 && menu !== 5 && tickN % 12 === 5) refreshVals();
     tickLeft();
     drainQ();
     drainLEDs();
@@ -602,29 +963,42 @@ globalThis.tick = function () {
 globalThis.onMidiMessageInternal = function (data) {
     const status = data[0] & 0xf0, d1 = data[1], d2 = data[2];
     if (status === 0xb0) {
-        if (d1 === MoveBack && d2 > 0) { clearAll(); host_exit_module(); return; }
+        if (d1 === MoveBack && d2 > 0) {
+            if (menu >= 0) { if (anyPopup()) { cancelPopups(); say('cancelled'); } else { menu = -1; paintTrackLEDs(); } return; }
+            clearAll(); host_exit_module(); return;
+        }
+        if (d1 === MoveMenu) { if (d2 > 0) openMenu(5); return; }        /* three lines = Sessions, like Loopex */
+        { const ri = ROW_CCS.indexOf(d1); if (ri >= 0) { if (d2 > 0) openMenu(ri); return; } }
         if (d1 === MoveShift) { shift = d2 > 0; setButtonLED(MoveShift, shift ? WhiteLedBright : WhiteLedDim, true); return; }
         if (d1 === MoveUndo) { undoHeld = d2 > 0; return; }
-        if ((d1 === MoveLeft || d1 === MoveRight) && d2 > 0) {
-            page = Math.max(0, Math.min(PAGES.length - 1, page + (d1 === MoveRight ? 1 : -1)));
-            overlay = { lbl: PAGES[page].name, txt: PAGES[page].k.map(d => d ? d[1].substring(0, 4) : '-').join(' ') };
-            overlayUntil = now() + 1500; acc.fill(0);
-            paintAll(true); return;
-        }
+        if (d1 === MoveLeft || d1 === MoveRight) { tapeKey(d1 === MoveLeft ? 0 : 1, d2 > 0); return; }
         if ((d1 === MoveUp || d1 === MoveDown) && d2 > 0) { selectVoice((sel + (d1 === MoveUp ? 1 : NV - 1)) % NV); return; }
-        if (d1 === MoveMainKnob) { const dd = decodeDelta(d2); if (dd) { view = (view + (dd > 0 ? 1 : VIEWS.length - 1)) % VIEWS.length; say('vue ' + VIEWS[view], 900); } return; }
-        if (d1 >= MoveKnob1 && d1 < MoveKnob1 + 8) { turnKnob(d1 - MoveKnob1, decodeDelta(d2)); return; }
+        if (d1 === MoveMainKnob) {
+            const dd = decodeDelta(d2); if (!dd) return;
+            if (menu === 0) { jogPlace(dd); return; }
+            if (menu === 5 && !anyPopup()) { sessSlot = Math.max(1, Math.min(NSLOTS, sessSlot + (dd > 0 ? 1 : -1))); valCache[0] = String(sessSlot); return; }
+            if (menu >= 0) return;
+            view = (view + (dd > 0 ? 1 : VIEWS.length - 1)) % VIEWS.length; say('vue ' + VIEWS[view], 900); return;
+        }
+        if (d1 >= MoveKnob1 && d1 < MoveKnob1 + 8) {
+            const k = d1 - MoveKnob1, dl = decodeDelta(d2);
+            const hg = k >= 4 ? heldGesture() : -1;
+            if (menu >= 0 && hg < 0) { menuKnob(k, dl); return; }
+            turnKnob(k, dl); return;
+        }
         return;
     }
     if (status === 0x90 || status === 0x80) {
         const on = status === 0x90 && d2 > 0;
         if (d1 <= 7) {                                                         /* knob touch */
-            if (on) { const hg = d1 >= 4 ? heldGesture() : -1; if (hg >= 0) showGestureKnob(hg, d1 - 4); else showKnob(d1); }
+            if (on) { const hg = d1 >= 4 ? heldGesture() : -1; if (hg >= 0) showGestureKnob(hg, d1 - 4);
+                      else if (menu >= 0) { if (!anyPopup()) { lastKnob = d1; lastKnobAt = now(); valCache[d1] = defValue((menuDefs() || [])[d1]); } }
+                      else showKnob(d1); }
             return;
         }
         if (d1 in N2L) { if (on) padDown(N2L[d1], d2 / 127); else padUp(N2L[d1]); return; }
         if (d1 in N2R) { if (on) rightDown(N2R[d1], d2 / 127); else rightUp(N2R[d1]); return; }
-        if (d1 in S2V) { if (on) selectVoice(S2V[d1]); return; }
+        if (d1 in S2V) { if (on) stepPress(S2V[d1]); return; }
         return;
     }
     if (status === 0xa0) {
