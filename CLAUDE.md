@@ -55,6 +55,9 @@ Voice architecture: 8-voice polyphonic, round-robin stealing.
   Réécriture: a sweep wears the region ahead of the head (heard within a second). Terne: make-up x2
   and a fast vactrol on strikes (strikes land at the held level). Hésitation no longer resets Gel.
   Futur less veiled (filter default 0.75). Saved states keep old gesture settings: Undo + pad resets.
+- v0.5.2: Lieu page knobs 5-8 = Coupe bas (6 dB/oct, 10 Hz-2 kHz, `FE_P_LOCUT`), Coupe haut (6 dB/oct,
+  20 kHz-2.1 kHz, `FE_P_HICUT`), Vitesse (same param as Matiere k1, x0.25-x4, x1 default), Volume.
+  A held right pad still takes knobs 5-8 for its settings. New params sit at the end of the voice state.
 
 ## Repo structure (v0.2, legacy)
 - `src/dsp/fouille.c` — all DSP logic (vactrol LPG, fetch thread, corpus navigator, ternary envelope, render_block)

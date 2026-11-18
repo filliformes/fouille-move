@@ -41,14 +41,15 @@ const S2V = {}; for (let i = 0; i < NV; i++) S2V[MoveSteps[i]] = i;
 /* ---- parameters (ids mirror engine/fe.h) ---- */
 const P = { PLACE: 0, SOURCE: 1, RADIUS: 2, FLOW: 3, RISE: 4, HOLD: 5, FALL: 6, STRIKE: 7,
             SCATTER: 8, START: 9, LENGTH: 10, DIR: 11, SPEED: 12, GRAIN: 13, LOCK: 14, WEAR: 15,
-            DRIFT: 16, TONE: 17, DRIVE: 18, PAN: 19, WIDTH: 20, POOL: 21, VOLUME: 22 };
+            DRIFT: 16, TONE: 17, DRIVE: 18, PAN: 19, WIDTH: 20, POOL: 21, VOLUME: 22,
+            LOCUT: 23, HICUT: 24 };
 const G = { VOLUME: 0, POOL_TIME: 1, POOL_FB: 2 };
 let NPLACES = 20;
 function steps(id) { return id === P.PLACE ? NPLACES : (id === P.SOURCE || id === P.HOLD) ? 3 : id === P.DIR ? 2 : 0; }
 
 const PAGES = [
     { name: 'Lieu',    k: [[P.PLACE, 'Lieu'], [P.SOURCE, 'Source'], [P.RADIUS, 'Rayon'], [P.FLOW, 'Flux'],
-                           null, null, null, [P.VOLUME, 'Volume']] },
+                           [P.LOCUT, 'Coupe bas'], [P.HICUT, 'Coupe haut'], [P.SPEED, 'Vitesse'], [P.VOLUME, 'Volume']] },
     { name: 'Geste',   k: [[P.RISE, 'Rise'], [P.HOLD, 'Hold'], [P.FALL, 'Fall'], [P.STRIKE, 'Frappe'],
                            [P.SCATTER, 'Dispersion'], [P.START, 'Depart'], [P.LENGTH, 'Longueur'], [P.DIR, 'Sens']] },
     { name: 'Matiere', k: [[P.SPEED, 'Vitesse'], [P.GRAIN, 'Grain'], [P.LOCK, 'Lock'], [P.WEAR, 'Usure'],

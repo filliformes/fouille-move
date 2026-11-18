@@ -68,6 +68,7 @@ typedef struct {
     float lp1[2], lp2[2];              /* LPG two-pole */
     float wlp[2];                      /* wear low-pass */
     float tlp[2];                      /* tone split */
+    float lc[2], hc[2];                /* low cut, high cut (one-pole each) */
     float bp1[2], bp2[2];              /* lock SVF */
     float hiss_lp;
     fe_drift dpitch, dpan, dpos;

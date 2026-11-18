@@ -46,6 +46,7 @@ enum {
     FE_P_SPEED, FE_P_GRAIN, FE_P_LOCK, FE_P_WEAR,
     FE_P_DRIFT, FE_P_TONE, FE_P_DRIVE,
     FE_P_PAN, FE_P_WIDTH, FE_P_POOL, FE_P_VOLUME,
+    FE_P_LOCUT, FE_P_HICUT,            /* 6 dB/oct: 0 = open (10 Hz / 20 kHz) */
     FE_P_COUNT
 };
 
