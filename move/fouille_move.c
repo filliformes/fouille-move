@@ -12,6 +12,7 @@
  *   x   "v,g,amt"      gesture amount (v = -1: all voices), right pads
  *   xp  "g,k,val"      gesture setting (knobs 5-8)
  *   xr  "g"            gesture settings back to defaults
+ *   xa  "v"            Futur: adopt the prepared fragment now (v = -1: all)
  *   state  <blob>      restore (from get_param("state"))
  *
  * get_param keys:
@@ -77,6 +78,7 @@ static void set_param(void *p, const char *key, const char *val) {
     if (!strcmp(key, "x"))  { if (sscanf(val, "%d,%d,%f", &v, &a, &x) == 3) fe_gesture(s->e, v, a, x); return; }
     if (!strcmp(key, "xp")) { if (sscanf(val, "%d,%d,%f", &v, &a, &x) == 3) fe_gesture_param(s->e, v, a, x); return; }
     if (!strcmp(key, "xr")) { if (sscanf(val, "%d", &v) == 1) fe_gesture_reset(s->e, v); return; }
+    if (!strcmp(key, "xa")) { if (sscanf(val, "%d", &v) == 1) fe_adopt(s->e, v); return; }
     if (!strcmp(key, "state")) {
         /* "G:g0,g1,g2;V0:p0,...;V1:...;F:frozen bits;X:x0,...(16 x 4)" — whitespace tolerant */
         const char *q = val;
@@ -117,11 +119,11 @@ static int get_param(void *p, const char *key, char *buf, int len) {
     fe_engine *e = s->e;
     int v = 0, id = 0; float x = 0;
 
-    if (!strcmp(key, "st")) {                      /* per voice: '0' + state | busy<<2 | frozen<<3 | searching<<4 */
+    if (!strcmp(key, "st")) {                      /* per voice: '0' + state | busy<<2 | frozen<<3 | searching<<4 | next ready<<5 */
         if (len < FE_NV + 1) return -1;
         for (int i = 0; i < FE_NV; i++)
             buf[i] = (char)('0' + (fe_voice_state(e, i) | (fe_voice_busy(e, i) << 2) | (fe_voice_frozen(e, i) << 3)
-                                  | (fe_voice_searching(e, i) << 4)));
+                                  | (fe_voice_searching(e, i) << 4) | (fe_voice_has_next(e, i) << 5)));
         buf[FE_NV] = 0;
         return FE_NV;
     }

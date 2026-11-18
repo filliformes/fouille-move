@@ -7,7 +7,8 @@
 #include <pthread.h>
 #include <sys/types.h>
 
-#define FE_NTAPES   (FE_NV + 1)        /* one spare: the harvest writes into it */
+#define FE_NFUT     6                  /* free tapes for Futur (a prepared next fragment) */
+#define FE_NTAPES   (2 * FE_NV + 1 + FE_NFUT)  /* current + past per voice, one spare the harvest writes into, Futur pool */
 #define FE_QSIZE    512                /* control events, power of two */
 #define FE_WAVE_N   128                /* waveform overview bins per tape */
 
@@ -37,7 +38,7 @@ typedef struct {
 
 typedef struct { uint8_t type, v, id; float val; } fe_event;
 
-enum { EV_GATE_ON = 1, EV_GATE_OFF, EV_PRESS, EV_REFETCH, EV_FREEZE, EV_SET, EV_GSET, EV_GEST, EV_XPARAM, EV_XRESET };
+enum { EV_GATE_ON = 1, EV_GATE_OFF, EV_PRESS, EV_REFETCH, EV_FREEZE, EV_SET, EV_GSET, EV_GEST, EV_XPARAM, EV_XRESET, EV_ADOPT };
 enum { ENV_OFF = 0, ENV_RISE, ENV_SUSTAIN, ENV_FALL };
 
 typedef struct {
@@ -85,6 +86,28 @@ typedef struct {
     float drift_km, drift_deg;         /* Derive: where the voice is now (0 = home) */
     float drift_wait, drift_peak, drift_hop;
     int   drift_armed, drift_redo;
+    /* Passe / Futur: the fragment before, the fragment prepared next */
+    fe_tape *past, *next;
+    float past_pos, next_pos, past_mix, next_mix, past_lp[2], next_lp[2];
+    int   past_delay, past_on, want_next, adopt;
+    /* Pulsars */
+    float pul_ph, pul_per, pul_mix;
+    int   pul_mask;
+    /* Corps: 6 modes x 2 channels, two-pole resonators */
+    float md_y1[6][2], md_y2[6][2], md_x1[2], md_x2[2], corps_mix;
+    /* Etirement: one factor for every time of the gesture */
+    float tf, st_ph[2], st_org[2], st_mix;
+    /* Voisin de timbre */
+    int   vn_u, vn_want;
+    float vn_pos, vn_mix, vn_T;
+    /* Reecriture */
+    float rw_lp[2];
+    int   rw_hole;
+    /* ternes: Terne, Double hasard, Hesitation */
+    float t_env, t_amp, t_rise, t_line, t_mix;
+    int   t_stage, t_k, t_fam, t_wait, t_on;
+    uint32_t t_rng;
+    int   auto_close;                  /* Hesitation: a closed voice replayed shortly, closes itself */
 
     atomic_int want;                   /* worker: 1 = harvest wanted */
     fe_request req;                    /* valid when want == 1 */
@@ -132,6 +155,12 @@ struct fe_engine {
     int    vrend[FE_NV];               /* voice rendered (Contagion sources) */
     float  vlat[FE_NV], vlon[FE_NV];   /* where each voice listens, this block */
     float *vbuf;                       /* Contagion: [FE_NV][2 kinds][2 ch][512], last block */
+    fe_tape *freet[FE_NFUT];           /* Futur: free tapes (audio thread only) */
+    int    nfree;
+    float  hes_wait, hes_mult;         /* Hesitation clock: seconds to the next pulse */
+    int    hes_n;
+    uint32_t hrng;
+    float *lastmix;                    /* Reecriture "le mix": previous block, mono */
     float *rs_l, *rs_r;                /* Ressac line */
     int    rs_len, rs_w;
     float  rs_lp[2], rs_hp[2], rs_ap[2], rs_amt, rs_ret;

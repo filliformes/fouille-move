@@ -211,6 +211,161 @@ static void gesture_tests(float SR) {
     free(a); free(b); free(c);
 }
 
+/* fraction of 5 ms windows below 15% of the mean window level: the gaps of an articulated sound */
+static float gaps(const float *b, int n, int sr) {
+    int w = sr / 200, nw = n / w, low = 0; double mean = 0; float lv[2000];
+    if (nw > 2000) nw = 2000;
+    for (int k = 0; k < nw; k++) { lv[k] = buf_rms(b + k * w, w); mean += lv[k]; }
+    mean /= nw > 0 ? nw : 1;
+    for (int k = 0; k < nw; k++) if (lv[k] < 0.15f * mean) low++;
+    return nw ? (float)low / nw : 0;
+}
+static fe_engine *two_open(float SR, int v) {          /* a fresh engine with voice v open and settled */
+    fe_engine *q = make(SR);
+    fe_gate(q, v, 1, 0.8f); run(q, SR, 0.6f, 128, NULL);
+    return q;
+}
+
+static void gesture_tests2(float SR) {
+    printf("gestures, the other ten\n");
+    const int N = (int)(2.0f * SR);
+    float *a = calloc((size_t)N, sizeof(float)), *b = calloc((size_t)N, sizeof(float));
+    stats x;
+
+    /* Pulsars: the sound is cut into trains of short windows */
+    fe_engine *e = two_open(SR, 0);
+    render_to(e, a, N);
+    fe_gesture(e, -1, FE_X_PULSARS, 0.15f); run(e, SR, 0.1f, 128, NULL);
+    render_to(e, b, N);
+    CHECK(gaps(b, N, (int)SR) > gaps(a, N, (int)SR) + 0.2f, "Pulsars cut the sound into pulses (gaps %.2f -> %.2f)", gaps(a, N, (int)SR), gaps(b, N, (int)SR));
+    fe_gesture(e, -1, FE_X_PULSARS, 1.0f); x = run(e, SR, 2.0f, 128, NULL);
+    CHECK(x.nan == 0 && x.peak <= 1 && rms(x) > 0.001f, "dense pulsars sound and stay bounded (rms %.4f)", rms(x));
+    fe_gesture(e, -1, FE_X_PULSARS, 0); run(e, SR, 0.2f, 128, NULL);
+    render_to(e, b, N);
+    CHECK(gaps(b, N, (int)SR) < gaps(a, N, (int)SR) + 0.1f, "released, the sound is whole again");
+
+    /* Corps: the fragment strikes a resonant body */
+    render_to(e, a, N);
+    fe_gesture(e, -1, FE_X_CORPS, 1.0f); run(e, SR, 0.3f, 128, NULL);
+    render_to(e, b, N);
+    x = run(e, SR, 4.0f, 128, NULL);
+    CHECK(diff_rms(a, b, N) > 0.3f * buf_rms(a, N), "Corps changes the sound (diff %.4f vs %.4f)", diff_rms(a, b, N), buf_rms(a, N));
+    CHECK(x.nan == 0 && x.peak <= 1 && rms(x) > 0.001f, "Corps at full resonance stays bounded (peak %.3f)", x.peak);
+    fe_gesture(e, -1, FE_X_CORPS, 0);
+    for (int m = 0; m < 3; m++) { fe_gesture_param(e, FE_X_CORPS, 1, m / 2.0f); fe_gesture(e, -1, FE_X_CORPS, 0.7f); x = run(e, SR, 1.0f, 128, NULL);
+        CHECK(x.nan == 0 && x.peak <= 1, "Corps matter %d runs clean", m); }
+    fe_gesture(e, -1, FE_X_CORPS, 0); fe_destroy(e);
+
+    /* Etirement: the head crawls, the sound goes on */
+    e = two_open(SR, 1);
+    float p0 = fe_voice_pos(e, 1); run(e, SR, 1.0f, 128, NULL); float p1 = fe_voice_pos(e, 1);
+    fe_gesture(e, -1, FE_X_ETIREMENT, 1.0f); run(e, SR, 0.2f, 128, NULL);
+    float q0 = fe_voice_pos(e, 1); x = run(e, SR, 1.0f, 128, NULL); float q1 = fe_voice_pos(e, 1);
+    float dn = fabsf(p1 - p0), ds = fabsf(q1 - q0);
+    CHECK(ds < dn / 3.0f, "Etirement slows the head (%.3f -> %.3f per s)", dn, ds);
+    CHECK(rms(x) > 0.002f && x.nan == 0, "stretched, it keeps sounding (rms %.4f)", rms(x));
+    fe_gesture(e, -1, FE_X_ETIREMENT, 0); fe_destroy(e);
+
+    /* Voisin de timbre: it glides to another fragment */
+    e = two_open(SR, 2); render_to(e, a, N); fe_destroy(e);
+    e = two_open(SR, 2); fe_gesture(e, 2, FE_X_VOISIN, 0.6f); run(e, SR, 0.0f, 128, NULL); render_to(e, b, N);
+    x = run(e, SR, 1.0f, 128, NULL);
+    CHECK(diff_rms(a, b, N) > 0.3f * buf_rms(a, N) && x.nan == 0, "Voisin de timbre plays another fragment (diff %.4f vs %.4f)", diff_rms(a, b, N), buf_rms(a, N));
+    fe_destroy(e);
+
+    /* Passe: after a renewal, the fragment before comes back */
+    float *c = calloc((size_t)N, sizeof(float));
+    for (int k = 0; k < 2; k++) {
+        e = two_open(SR, 3);
+        fe_refetch(e, 3);
+        for (int t = 0; t < 400 && fe_voice_busy(e, 3); t++) { run(e, SR, 0.005f, 128, NULL); msleep(1); }
+        run(e, SR, 0.5f, 128, NULL);
+        if (k) { fe_gesture(e, -1, FE_X_PASSE, 1.0f); run(e, SR, 0.6f, 128, NULL); }
+        render_to(e, k ? b : c, N);
+        fe_destroy(e);
+    }
+    CHECK(diff_rms(c, b, N) > 0.3f * buf_rms(c, N), "Passe brings the old fragment back (diff %.4f vs %.4f)", diff_rms(c, b, N), buf_rms(c, N));
+
+    /* Reecriture: the fragment comes back worn, and stays worn */
+    e = make(SR);
+    fe_set(e, 4, FE_P_LENGTH, 0.1f);
+    fe_gate(e, 4, 1, 1.0f); run(e, SR, 0.5f, 128, NULL);
+    render_to(e, a, N);
+    fe_gesture_param(e, FE_X_REECRITURE, 0, 1.0f);
+    fe_gesture(e, -1, FE_X_REECRITURE, 1.0f); run(e, SR, 6.0f, 128, NULL);
+    fe_gesture(e, -1, FE_X_REECRITURE, 0); run(e, SR, 0.1f, 128, NULL);
+    render_to(e, b, N);
+    CHECK(bright(b, N) < bright(a, N) * 0.8f, "Reecriture wears the tape: darker after (%.3f -> %.3f)", bright(a, N), bright(b, N));
+    CHECK(buf_rms(b, N) > 0.001f, "and it still sounds (rms %.4f)", buf_rms(b, N));
+    fe_destroy(e);
+
+    /* Terne: strikes and silences; Double hasard: the same seed, the same draws */
+    e = two_open(SR, 5);
+    render_to(e, a, N);
+    fe_gesture_param(e, FE_X_TERNE, 2, 0.5f);
+    fe_gesture(e, -1, FE_X_TERNE, 0.5f); run(e, SR, 0.05f, 128, NULL);
+    render_to(e, b, N);
+    CHECK(gaps(b, N, (int)SR) > gaps(a, N, (int)SR) + 0.2f, "Terne articulates the sound (gaps %.2f -> %.2f)", gaps(a, N, (int)SR), gaps(b, N, (int)SR));
+    for (int f = 0; f < 5; f++) { fe_gesture_param(e, FE_X_TERNE, 0, f / 4.0f); x = run(e, SR, 1.0f, 128, NULL);
+        CHECK(x.nan == 0 && x.peak <= 1 && rms(x) > 0.0005f, "family %d plays (rms %.4f)", f, rms(x)); }
+    fe_gesture(e, -1, FE_X_TERNE, 0); fe_destroy(e);
+    float *d2 = calloc((size_t)N, sizeof(float));
+    for (int k = 0; k < 3; k++) {
+        e = two_open(SR, 6);
+        fe_gesture_param(e, FE_X_DOUBLE, 1, k == 2 ? 0.7f : 0.2f);
+        fe_gesture(e, -1, FE_X_DOUBLE, 0.9f);
+        render_to(e, k == 0 ? a : k == 1 ? b : d2, N);
+        fe_destroy(e);
+    }
+    CHECK(diff_rms(a, b, N) < 1e-6f, "Double hasard: same seed, same draws (diff %.6f)", diff_rms(a, b, N));
+    CHECK(diff_rms(a, d2, N) > 0.1f * buf_rms(a, N), "another seed, other draws (diff %.4f)", diff_rms(a, d2, N));
+    CHECK(gaps(a, N, (int)SR) > 0.15f, "Double hasard articulates too (gaps %.2f)", gaps(a, N, (int)SR));
+    free(d2);
+
+    /* Hesitation: with closed sounds allowed, the sounds replay alone */
+    for (int k = 0; k < 2; k++) {
+        e = make(SR);
+        fe_gesture_param(e, FE_X_HESITATION, 0, 0.8f);
+        fe_gesture_param(e, FE_X_HESITATION, 2, k ? 1.0f : 0.0f);
+        fe_gesture(e, -1, FE_X_HESITATION, 1.0f);
+        x = run(e, SR, 3.0f, 128, NULL);
+        if (k) CHECK(rms(x) > 0.002f && x.nan == 0, "Hesitation replays closed sounds on its pulse (rms %.4f)", rms(x));
+        else   CHECK(x.peak == 0, "with 'sons ouverts' only, closed sounds stay silent (peak %g)", x.peak);
+        fe_gesture(e, -1, FE_X_HESITATION, 0); run(e, SR, 4.0f, 128, NULL);
+        int open = 0; for (int v = 0; v < FE_NV; v++) open += fe_voice_state(e, v) == FE_VS_PLAYING;
+        if (k) CHECK(open == 0, "released, the replayed sounds close themselves (%d open)", open);
+        fe_destroy(e);
+    }
+    e = two_open(SR, 7);
+    render_to(e, a, N);
+    fe_gesture_param(e, FE_X_HESITATION, 0, 0.9f);
+    fe_gesture(e, -1, FE_X_HESITATION, 1.0f);
+    render_to(e, b, N);
+    CHECK(diff_rms(a, b, N) > 0.2f * buf_rms(a, N), "an open sound replays from Depart on the pulse (diff %.4f)", diff_rms(a, b, N));
+    fe_destroy(e);
+
+    /* Futur: the next fragment is prepared, heard through, then adopted */
+    e = two_open(SR, 8);
+    fe_card f0; fe_voice_card(e, 8, &f0);
+    render_to(e, a, N);
+    fe_gesture(e, 8, FE_X_FUTUR, 1.0f);
+    for (int t = 0; t < 600 && !fe_voice_has_next(e, 8); t++) { run(e, SR, 0.005f, 128, NULL); msleep(1); }
+    CHECK(fe_voice_has_next(e, 8), "Futur prepares the next fragment");
+    fe_card f1; fe_voice_card(e, 8, &f1);
+    CHECK(f1.seconds == f0.seconds && f1.centroid_hz == f0.centroid_hz, "the current one keeps playing meanwhile");
+    run(e, SR, 0.6f, 128, NULL);
+    render_to(e, b, N);
+    CHECK(diff_rms(a, b, N) > 0.2f * buf_rms(a, N), "and the next one is heard through (diff %.4f)", diff_rms(a, b, N));
+    fe_adopt(e, 8);
+    for (int t = 0; t < 100 && fe_voice_has_next(e, 8); t++) run(e, SR, 0.01f, 128, NULL);
+    fe_card f2; fe_voice_card(e, 8, &f2);
+    CHECK(!fe_voice_has_next(e, 8) && (f2.seconds != f0.seconds || f2.centroid_hz != f0.centroid_hz), "Shift + Futur adopts it (%.2f s -> %.2f s)", f0.seconds, f2.seconds);
+    CHECK(fe_voice_state(e, 8) == FE_VS_PLAYING, "and the voice plays on");
+    fe_destroy(e);
+
+    free(a); free(b); free(c);
+}
+
 int main(void) {
     const float SR = 44100;
     printf("fouille engine tests\n");
@@ -312,6 +467,7 @@ int main(void) {
     fe_destroy(p);
 
     gesture_tests(SR);
+    gesture_tests2(SR);
 
     /* CPU: 16 voices playing, all colours, render time per 128-frame block */
     fe_engine *q = make(SR);
@@ -322,13 +478,13 @@ int main(void) {
     clock_gettime(CLOCK_MONOTONIC, &t1);
     double us = ((t1.tv_sec - t0.tv_sec) * 1e6 + (t1.tv_nsec - t0.tv_nsec) / 1e3) / (5.0 * SR / 128);
     printf("  info 16 voices: %.1f us per 128-frame block (budget 2902 us)\n", us);
-    for (int g = 0; g < FE_X_COUNT; g++) if (fe_gesture_ready(g) && g != FE_X_DERIVE) fe_gesture(q, -1, g, 0.8f);
+    for (int g = 0; g < FE_X_COUNT; g++) if (fe_gesture_ready(g) && g != FE_X_DERIVE && g != FE_X_FUTUR) fe_gesture(q, -1, g, 0.8f);
     run(q, SR, 1.0f, 128, NULL);
     clock_gettime(CLOCK_MONOTONIC, &t0);
     stats all = run(q, SR, 5.0f, 128, NULL);
     clock_gettime(CLOCK_MONOTONIC, &t1);
     us = ((t1.tv_sec - t0.tv_sec) * 1e6 + (t1.tv_nsec - t0.tv_nsec) / 1e3) / (5.0 * SR / 128);
-    printf("  info 16 voices + 5 gestures on all: %.1f us per block\n", us);
+    printf("  info 16 voices + 14 gestures on all: %.1f us per block\n", us);
     CHECK(all.nan == 0 && all.peak <= 1.0f, "everything at once stays finite and bounded (peak %.3f)", all.peak);
     fe_destroy(q);
 

@@ -8,8 +8,9 @@
  * Velocite = frappe du LPG ; pression = la voix s'ouvre.
  * Pads de droite (16) = les gestes, une rangee par idee (haut : Transformer,
  * Deplacer, Se souvenir, Deviner). Tenir = le geste joue ; velocite puis pression
- * = intensite ; Shift + pad = verrouiller / deverrouiller ; Undo + pad = reglages
- * par defaut ; knobs 5-8 = reglages du geste tenu.
+ * = intensite ; Shift + pad = verrouiller / deverrouiller (Shift + Futur = adopter
+ * le fragment prepare) ; Undo + pad = reglages par defaut ; knobs 5-8 = reglages
+ * du geste tenu.
  * Boutons de pas = choisir la voix. Gauche / Droite = page de reglages.
  * Molette = vue (Voix, Carte, Credits). Knobs 1-8 = la page de la voix choisie.
  * Back = suspendre (les voix continuent).
@@ -64,12 +65,23 @@ const X_NAMES = ['Bongo', 'Pulsars', 'Accroche', 'Corps',
                  'Terne', 'Double hasard', 'Hesitation', 'Futur'];
 const X_KNOBS = {
     0: ['Montee', 'Chute', 'Non-lineaire', 'Decalage'],
+    1: ['Taille', 'Regularite', 'Forme', 'Masque'],
     2: ['Centre', 'Largeur', 'Suivi', 'Melange'],
+    3: ['Accord', 'Matiere', 'Brillance', 'Melange'],
+    4: ['Plage min', 'Plage max', 'Courbe', 'Lien vitesse'],
     5: ['Portee', 'Courbe', 'Son source', 'Stereo'],
+    6: ['Axe X brill.', 'Axe Y intens.', 'Fondu', 'Lieu garde'],
     7: ['Direction', 'Rayon', 'Vitesse', 'Retour'],
     8: ['Respiration', 'Derive', 'Fondu entree', 'Fondu sortie'],
     9: ['Temps', 'Filtre', 'Dephasage', 'Plafond'],
+    10: ['Reprise', 'Fondu', 'Usure souvenir', 'Decalage'],
+    11: ['Perte aigus', 'Craquements', 'Trous', 'Source'],
+    12: ['Famille', 'Ligne', 'Delai', 'Lissage'],
+    13: ['Familles', 'Graine', 'Memoire', 'Retour'],
+    14: ['Tempo', 'Instabilite', 'Sons concernes', 'Bascule'],
+    15: ['Fondu', 'Filtre', 'Position', 'Source'],
 };
+const X_FUTUR = 15;
 function gOf(i) { return (3 - Math.floor(i / 4)) * 4 + (i % 4); }   /* right pad index (0 = bottom-left) -> gesture */
 const LONG_MS = 400, DOUBLE_MS = 300, MAX_PER_VOICE = 4;
 
@@ -77,6 +89,7 @@ const LONG_MS = 400, DOUBLE_MS = 300, MAX_PER_VOICE = 4;
 let sel = 0, page = 0, view = 0, tickN = 0, shift = false;
 const st = new Array(NV).fill(0);          /* engine state 0..3 */
 const busy = new Array(NV).fill(false), frozen = new Array(NV).fill(false), searching = new Array(NV).fill(false);
+const hasNext = new Array(NV).fill(false);                 /* Futur: a next fragment is ready */
 const latched = new Array(NV).fill(false), downAt = new Array(NV).fill(0), consumed = new Array(NV).fill(false);
 const lastUp = new Array(NV).fill(0), openedNow = new Array(NV).fill(false), wasOpen = new Array(NV).fill(false);
 const closeAt = new Array(NV).fill(0), leftUsed = new Array(NV).fill(false), longShown = new Array(NV).fill(false);
@@ -170,6 +183,9 @@ function pollStates() {
     for (let i = 0; i < NV; i++) {
         const c = s.charCodeAt(i) - 48;
         const nst = c & 3, nb = !!(c & 4), nf = !!(c & 8), ns = !!(c & 16);
+        const nn = !!(c & 32);
+        if (nn && !hasNext[i] && rh.some(h => h && h.g === X_FUTUR)) say('futur pret : son ' + (i + 1), 900);
+        hasNext[i] = nn;
         if (nst !== st[i] || nb !== busy[i] || nf !== frozen[i] || ns !== searching[i]) {
             const arrived = i === sel && busy[i] && !nb;
             st[i] = nst; busy[i] = nb; frozen[i] = nf; searching[i] = ns;
@@ -348,6 +364,14 @@ function rightDown(i, vel) {
     let voices = heldLeft();
     for (const v of voices) leftUsed[v] = true;
     if (!voices.length) voices = null;
+    let voices0 = voices;
+    if (g === X_FUTUR && shift) {                      /* Shift + Futur: adopt what was prepared */
+        const vs = voices0 || [...Array(NV).keys()];
+        const ready = vs.filter(v => hasNext[v]);
+        if (voices0) for (const v of voices0) spB('xa', String(v)); else spB('xa', '-1');
+        say(ready.length ? 'futur adopte : ' + ready.length + ' son' + (ready.length > 1 ? 's' : '') : 'aucun futur pret');
+        return;
+    }
     /* Shift on a latched gesture: unlatch it */
     if (shift) {
         if (!voices && gLatch[g] > 0) { gLatch[g] = 0; sendX(-1, g, 0); say(X_NAMES[g] + ' libere'); paintRight(false); return; }

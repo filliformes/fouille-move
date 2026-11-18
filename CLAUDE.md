@@ -23,12 +23,18 @@ Voice architecture: 8-voice polyphonic, round-robin stealing.
 - `legacy/` — the v0.2 sound_generator, kept for reference, not built
 - Install path is now `modules/overtake/fouille/`; install by atomic rename (`scripts/install.sh`)
 
-## Right pads: gestures (v0.4.0)
+## Right pads: gestures (v0.5.0)
 - Grid by idea, top row first: Transformer (Bongo, Pulsars, Accroche, Corps), Déplacer (Étirement,
   Contagion, Voisin de timbre, Dérive géosonique), Se souvenir (Gel, Ressac, Passé, Réécriture),
   Deviner (Terne, Double hasard, Hésitation, Futur). Ids = `FE_X_*` in `engine/fe.h`.
-- Built so far: Bongo, Accroche, Contagion, Dérive géosonique, Gel, Ressac (`fe_gesture_ready`). The
-  others light no LED and say "à venir".
+- All 16 built. Terne lines use five families of our own (Rebond, Rafale, Bégaiement, Vague, Pluie,
+  `t_line_step`); Double hasard draws lines/families from them; Hésitation is one shared pulse.
+- Memory: each voice keeps its previous fragment (Passé) and a pool of FE_NFUT=6 tapes holds prepared
+  next fragments (Futur): 39 tapes of 30 s, about 206 MB at 44.1 kHz (was 17 tapes, 90 MB).
+  Shift + Futur = adopt (`fe_adopt`, key `xa`), not latch. A renewal (refetch or flux) adopts a
+  prepared Futur instead of harvesting.
+- Voisin de timbre picks among the 16 fragments in RAM (no disk corpus yet). Réécriture writes into
+  the tape: the wear stays after release, until the fragment is renewed.
 - A gesture has an amount (0 = off) and 4 settings (knobs 5-8). Global amount (v = -1) + per-voice
   amount; a voice hears the larger. Onsets are detected in the engine (`gestures_block`).
 - UI: hold = plays; velocity then pressure = amount; Shift = latch/unlatch; Undo + pad = default

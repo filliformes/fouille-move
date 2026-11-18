@@ -122,6 +122,8 @@ float fe_gesture_param_get(const fe_engine *e, int g, int k);
 float fe_gesture_param_default(int g, int k);
 int   fe_gesture_ready(int g);                                    /* 1 = built in this version */
 int   fe_gesture_format(int g, int k, float value01, char *buf, int len);
+void  fe_adopt(fe_engine *e, int v);                              /* Futur: play the prepared fragment now (v = -1: all) */
+int   fe_voice_has_next(const fe_engine *e, int v);               /* Futur: a next fragment is ready */
 
 /* Display string for a param value ("Plateau", "1.2 km", "120 ms"...). */
 int  fe_format(const fe_engine *e, int v, int id, float value01, char *buf, int len);
