@@ -344,10 +344,10 @@ static void gesture_tests2(float SR) {
     /* Coupe haut / coupe bas (Lieu page, knobs 5-6): darker, thinner */
     e = two_open(SR, 3);
     render_to(e, a, N);
-    fe_set(e, 3, FE_P_HICUT, 1.0f); run(e, SR, 0.05f, 128, NULL);
+    fe_set(e, 3, FE_P_HICUT, 0.0f); run(e, SR, 0.05f, 128, NULL);
     render_to(e, b, N);
     CHECK(bright(b, N) < bright(a, N) * 0.8f, "Coupe haut at 2.1 kHz darkens the sound (%.3f -> %.3f)", bright(a, N), bright(b, N));
-    fe_set(e, 3, FE_P_HICUT, 0.0f); fe_set(e, 3, FE_P_LOCUT, 1.0f); run(e, SR, 0.05f, 128, NULL);
+    fe_set(e, 3, FE_P_HICUT, 1.0f); fe_set(e, 3, FE_P_LOCUT, 1.0f); run(e, SR, 0.05f, 128, NULL);
     render_to(e, b, N);
     CHECK(bright(b, N) > bright(a, N) * 1.1f && buf_rms(b, N) < buf_rms(a, N), "Coupe bas at 2 kHz thins it (bright %.3f, rms %.4f -> %.4f)", bright(b, N), buf_rms(a, N), buf_rms(b, N));
     fe_destroy(e);

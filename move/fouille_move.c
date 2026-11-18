@@ -83,9 +83,12 @@ static void set_param(void *p, const char *key, const char *val) {
     if (!strcmp(key, "state")) {
         /* "G:g0,g1,g2;V0:p0,...;V1:...;F:frozen bits;X:x0,...(16 x 4)" — whitespace tolerant */
         const char *q = val;
+        int rev = 0;                                   /* R:2 = coupe haut stored with 1 = open (since v0.5.3) */
         while (*q) {
             while (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t' || *q == ';') q++;
-            if (*q == 'G' && q[1] == ':') {
+            if (*q == 'R' && q[1] == ':') {
+                char *end; rev = (int)strtol(q + 2, &end, 10); q = end;
+            } else if (*q == 'G' && q[1] == ':') {
                 q += 2;
                 for (int i = 0; i < FE_G_COUNT; i++) { char *end; float f = strtof(q, &end); if (end == q) break; fe_set_global(s->e, i, f); q = end; if (*q == ',') q++; }
             } else if (*q == 'V') {
@@ -93,6 +96,7 @@ static void set_param(void *p, const char *key, const char *val) {
                 if (*q == ':') q++;
                 for (int i = 0; i < FE_P_COUNT; i++) {
                     float f = strtof(q, &end); if (end == q) break;
+                    if (i == FE_P_HICUT && rev < 2) f = 1.0f - f;   /* v0.5.2 stored it the other way round */
                     if (vi >= 0 && vi < FE_NV) fe_set(s->e, (int)vi, i, f);
                     q = end; if (*q == ',') q++;
                 }
@@ -193,7 +197,7 @@ static int get_param(void *p, const char *key, char *buf, int len) {
     if (!strcmp(key, "nplaces"))   return snprintf(buf, (size_t)len, "%d", fe_place_count());
     if (!strcmp(key, "gv"))        return snprintf(buf, (size_t)len, "%.4f,%.4f,%.4f", fe_get_global(e, 0), fe_get_global(e, 1), fe_get_global(e, 2));
     if (!strcmp(key, "state")) {
-        int n = snprintf(buf, (size_t)len, "G:%.4f,%.4f,%.4f", fe_get_global(e, 0), fe_get_global(e, 1), fe_get_global(e, 2));
+        int n = snprintf(buf, (size_t)len, "R:2;G:%.4f,%.4f,%.4f", fe_get_global(e, 0), fe_get_global(e, 1), fe_get_global(e, 2));
         int bits = 0;
         for (int i = 0; i < FE_NV && n < len - 300; i++) {
             n += snprintf(buf + n, (size_t)(len - n), ";V%d:", i);

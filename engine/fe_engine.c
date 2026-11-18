@@ -40,7 +40,7 @@ static float m_grain(float v)   { return 0.01f * powf(50.0f, v); }       /* 10 m
 static float m_radius(float v)  { return powf(2.0f, (v - 0.5f) * 4.0f); }/* x0.25 .. x4 */
 static float m_flow(float v)    { return v < 0.02f ? 0.0f : 10.0f * powf(60.0f, v); } /* off, 10 s .. 10 min */
 static float m_locut(float v)   { return 10.0f * powf(200.0f, v); }      /* 10 Hz .. 2 kHz */
-static float m_hicut(float v)   { return 20000.0f * powf(2100.0f / 20000.0f, v); } /* 20 kHz .. 2.1 kHz */
+static float m_hicut(float v)   { return 2100.0f * powf(20000.0f / 2100.0f, v); } /* 2.1 kHz .. 20 kHz (right = open) */
 static float m_pooltime(float v){ return 0.08f * powf(25.0f, v); }       /* 80 ms .. 2 s */
 
 static const float P_DEFAULT[FE_P_COUNT] = {
@@ -50,7 +50,7 @@ static const float P_DEFAULT[FE_P_COUNT] = {
     [FE_P_SPEED] = 0.5f, [FE_P_GRAIN] = 0.4f, [FE_P_LOCK] = 0, [FE_P_WEAR] = 0.15f,
     [FE_P_DRIFT] = 0.25f, [FE_P_TONE] = 0.5f, [FE_P_DRIVE] = 0,
     [FE_P_PAN] = 0.5f, [FE_P_WIDTH] = 0.67f, [FE_P_POOL] = 0, [FE_P_VOLUME] = 0.7f,
-    [FE_P_LOCUT] = 0, [FE_P_HICUT] = 0,
+    [FE_P_LOCUT] = 0, [FE_P_HICUT] = 1.0f,
 };
 
 /* ── control queue (SPSC) ───────────────────────────────────────────────── */
@@ -724,7 +724,7 @@ static void render_voice(fe_engine *e, fe_voice *v, int vi, float *ml, float *mr
     const float tlp_a = 1.0f - expf(-2.0f * (float)M_PI * 800.0f / sr);
     const float g_lo = powf(4.0f, -tone * 0.5f), g_hi = powf(4.0f, tone * 0.5f);
     const float drive_k = v->p[FE_P_DRIVE] * 8.0f;
-    const int   lc_on = v->p[FE_P_LOCUT] > 0.001f, hc_on = v->p[FE_P_HICUT] > 0.001f;
+    const int   lc_on = v->p[FE_P_LOCUT] > 0.001f, hc_on = v->p[FE_P_HICUT] < 0.999f;
     const float lc_a = 1.0f - expf(-2.0f * (float)M_PI * m_locut(v->p[FE_P_LOCUT]) / sr);
     const float hc_a = 1.0f - expf(-2.0f * (float)M_PI * fminf(m_hicut(v->p[FE_P_HICUT]), 0.45f * sr) / sr);
     const float width = v->p[FE_P_WIDTH] * 1.5f;
@@ -1542,7 +1542,7 @@ int fe_format(const fe_engine *e, int v, int id, float x, char *b, int len) {
     case FE_P_GRAIN:  return snprintf(b, L, "%d ms", (int)(m_grain(x) * 1000));
     case FE_P_SPEED:  return snprintf(b, L, "x%.2f", m_speed(x));
     case FE_P_LOCUT:  { float f = m_locut(x); return x <= 0.001f ? snprintf(b, L, "off (10 Hz)") : f < 1000 ? snprintf(b, L, "%d Hz", (int)(f + 0.5f)) : snprintf(b, L, "%.2f kHz", f / 1000); }
-    case FE_P_HICUT:  { float f = m_hicut(x); return x <= 0.001f ? snprintf(b, L, "off (20 kHz)") : snprintf(b, L, "%.1f kHz", f / 1000); }
+    case FE_P_HICUT:  { float f = m_hicut(x); return x >= 0.999f ? snprintf(b, L, "off (20 kHz)") : snprintf(b, L, "%.1f kHz", f / 1000); }
     case FE_P_PAN:    { int p = (int)((x - 0.5f) * 200); return p == 0 ? snprintf(b, L, "C") : snprintf(b, L, "%c%d", p < 0 ? 'L' : 'R', abs(p)); }
     case FE_P_TONE:   { int p = (int)((x - 0.5f) * 200); return snprintf(b, L, "%+d", p); }
     case FE_P_START: case FE_P_LENGTH: {
