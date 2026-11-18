@@ -17,15 +17,17 @@
  */
 
 import {
-    Black, White, LightGrey, DarkGrey,
-    NeonGreen, DarkMutedTeal, VeryDarkAzure,
+    Black, White, LightGrey, DarkGrey, NeonGreen,
     MoveShift, MoveBack, MoveLeft, MoveRight, MoveUp, MoveDown, MoveMainKnob,
     MoveKnob1, MoveSteps, MoveCopy, MoveMenu, MoveUndo, MoveCapture,
     WhiteLedOff, WhiteLedDim, WhiteLedBright,
 } from '/data/UserData/schwung/shared/constants.mjs';
 import * as C from '/data/UserData/schwung/shared/constants.mjs';
 import { setLED, setButtonLED, decodeDelta } from '/data/UserData/schwung/shared/input_filter.mjs';
-const GestOnVoice = (C.Blue !== undefined) ? C.Blue : 125;   /* a voice carrying its own latched gesture */
+function col(name, fb) { return (C[name] !== undefined) ? C[name] : fb; }
+/* Right pads: one colour per row (per idea), like Loopex; touched or latched = White. */
+const ROW_COLORS = [col('AzureBlue', 125), col('NeonPink', 21), col('Purple', 104), col('VividYellow', 7)];
+const FuturReady = col('BrightOrange', 3);                  /* a playing voice with a next fragment prepared */
 
 const NV = 16;
 const W = 128;
@@ -90,6 +92,9 @@ let sel = 0, page = 0, view = 0, tickN = 0, shift = false;
 const st = new Array(NV).fill(0);          /* engine state 0..3 */
 const busy = new Array(NV).fill(false), frozen = new Array(NV).fill(false), searching = new Array(NV).fill(false);
 const hasNext = new Array(NV).fill(false);                 /* Futur: a next fragment is ready */
+const openE = new Array(NV).fill(false);                   /* the engine says: held open */
+const closing = new Array(NV).fill(false);                 /* closed by the hand: dark now, the sound closes after the double-tap window */
+const quietUntil = new Array(NV).fill(0);                  /* ignore a stale 'open' readback just after a close */
 const latched = new Array(NV).fill(false), downAt = new Array(NV).fill(0), consumed = new Array(NV).fill(false);
 const lastUp = new Array(NV).fill(0), openedNow = new Array(NV).fill(false), wasOpen = new Array(NV).fill(false);
 const closeAt = new Array(NV).fill(0), leftUsed = new Array(NV).fill(false), longShown = new Array(NV).fill(false);
@@ -100,6 +105,16 @@ const rh = new Array(NV).fill(null);                       /* held right pads: {
 let rhOrder = [];                                          /* right pads in the order they were pressed */
 const xpv = {};                                            /* gesture settings cache, by gesture */
 let undoHeld = false;
+let statusG = -1, statusV = 0, statusUntil = 0, statusTxt = '';   /* the screen line for the gesture in hand */
+const STATUS_LINGER = { 7: 8000, 15: 8000 };              /* Derive, Futur: the wait shows after the tap */
+function watchGesture(g, v) { statusG = g; statusV = v; statusTxt = ''; statusUntil = 0; pollStatus(); }
+function pollStatus() {
+    if (statusG < 0) return;
+    const held = rh.some(h => h && h.g === statusG);
+    if (!held && now() >= statusUntil) { statusG = -1; statusTxt = ''; return; }
+    const t = gp('xst:' + statusG + ',' + statusV);
+    statusTxt = t || '';
+}
 let pv = [];                                /* params of the selected voice */
 let gv = [0.6, 0.6, 0.45];
 let card = null, wave = '', pos = 0, net = '';
@@ -124,21 +139,32 @@ function clamp(x) { return x < 0 ? 0 : (x > 1 ? 1 : x); }
 let ledQ = [];
 function enq(note, c) { ledQ.push([note, c]); }
 function drainLEDs() { let n = 8; while (n-- > 0 && ledQ.length) { const e = ledQ.shift(); setLED(e[0], e[1]); } }
-/* No blinking anywhere: a pad changes colour only when its voice changes state.
- * (v0.3.0 blinked every searching pad at load: 16 pads flashing. Vincent: unpleasant.) */
+/* Like Loopex: a left pad is dark unless its sound plays, and it changes the moment the hand does.
+ * No blinking anywhere (v0.3.0 blinked every searching pad at load: Vincent: unpleasant). */
 const padShown = new Array(NV).fill(-1);
-function hasOwn(v) { for (let g = 0; g < XN; g++) if (vLatch[v][g] > 0) return true; return false; }
-function voiceColor(i) {
-    if (st[i] < 2) return searching[i] ? VeryDarkAzure : Black;      /* empty; dim blue = listening now */
-    if (st[i] === 3 && hasOwn(i)) return GestOnVoice;                 /* playing with its own latched gesture */
-    if (st[i] === 3) return frozen[i] ? White : NeonGreen;
-    return frozen[i] ? LightGrey : DarkMutedTeal;
+function ownGesture(v) {                                    /* the last latched gesture of this voice, or -1 */
+    let best = -1;
+    for (let g = 0; g < XN; g++) if (vLatch[v][g] > 0) best = g;
+    return best;
 }
-function paintVoice(i, force) {
+function playing(i) {
+    if (closing[i]) return false;
+    if (latched[i]) return true;
+    return openE[i] && now() >= quietUntil[i];
+}
+function voiceColor(i) {
+    if (!playing(i)) return Black;
+    if (frozen[i]) return White;
+    const og = ownGesture(i);
+    if (og >= 0) return ROW_COLORS[Math.floor(og / 4)];      /* its own gesture: that row's colour */
+    if (hasNext[i]) return FuturReady;
+    return NeonGreen;
+}
+function paintVoice(i, force, now_) {                       /* now_: the hand did it, light it at once */
     const c = voiceColor(i);
     if (!force && c === padShown[i]) return;
     padShown[i] = c;
-    if (force) setLED(LEFT[i], c, true); else enq(LEFT[i], c);
+    if (force || now_) setLED(LEFT[i], c, true); else enq(LEFT[i], c);
 }
 const rightShown = new Array(NV).fill(-1);
 function heldLeft() { const a = []; for (let i = 0; i < NV; i++) if (downAt[i]) a.push(i); return a; }
@@ -147,15 +173,15 @@ function rightColor(i) {
     if (!xready[g]) return Black;
     if (rh[i]) return White;
     const hl = heldLeft();
-    if (hl.length) return vLatch[hl[0]][g] > 0 ? LightGrey : DarkGrey;   /* holding a sound: show its own gestures */
-    return gLatch[g] > 0 ? LightGrey : DarkGrey;
+    if (hl.length) return vLatch[hl[0]][g] > 0 ? White : ROW_COLORS[Math.floor(g / 4)];   /* holding a sound: its own gestures */
+    return gLatch[g] > 0 ? White : ROW_COLORS[Math.floor(g / 4)];
 }
-function paintRight(force) {
+function paintRight(force, now_) {                          /* now_: straight to the pads, not through the queue */
     for (let i = 0; i < NV; i++) {
         const c = rightColor(i);
         if (!force && c === rightShown[i]) continue;
         rightShown[i] = c;
-        if (force) setLED(RIGHT[i], c, true); else enq(RIGHT[i], c);
+        if (force || now_) setLED(RIGHT[i], c, true); else enq(RIGHT[i], c);
     }
 }
 function paintAll(force) {
@@ -193,8 +219,15 @@ function pollStates() {
             if (arrived) loadCard();
         }
         if (nst !== 3 && latched[i] && !downAt[i]) latched[i] = false;               /* the DSP is the truth */
+        if (nn !== hadNext[i]) { hadNext[i] = nn; paintVoice(i, false); }
+    }
+    const o = gp('op');
+    if (o && o.length >= NV) for (let i = 0; i < NV; i++) {
+        const on = o.charAt(i) === '1';
+        if (on !== openE[i]) { openE[i] = on; if (!on && !downAt[i] && !closeAt[i]) latched[i] = false; paintVoice(i, false); }
     }
 }
+const hadNext = new Array(NV).fill(false);
 function loadParams() {
     const s = gp('pv:' + sel);
     if (s) pv = s.split(',').map(parseFloat);
@@ -290,12 +323,21 @@ function turnKnob(k, delta) {
 }
 
 /* ---- left pads: the sounds ---- */
-function isOpen(i) { return latched[i] || st[i] === 3; }
-function openVoice(i, vel) { spB('g', i + ',1,' + vel.toFixed(3)); latched[i] = true; }
-function closeVoice(i) { spB('g', i + ',0,0'); latched[i] = false; }
+function isOpen(i) { return latched[i] || (openE[i] && now() >= quietUntil[i]); }   /* a sound in its tail is closed */
+function openVoice(i, vel) {
+    spB('g', i + ',1,' + vel.toFixed(3)); latched[i] = true; closing[i] = false;
+    paintVoice(i, false, true);
+}
+function closeVoice(i) {
+    spB('g', i + ',0,0'); latched[i] = false; closing[i] = false; openE[i] = false;
+    quietUntil[i] = now() + 250;
+    paintVoice(i, false, true);
+}
 function toggleFreeze(i) {
     spB('fz', i + ',' + (frozen[i] ? 0 : 1));
     say(frozen[i] ? 'voix liberee' : 'voix figee');
+    frozen[i] = !frozen[i];                            /* the readback confirms it */
+    paintVoice(i, false, true);
 }
 function padDown(i, vel) {
     selectVoice(i);
@@ -308,22 +350,25 @@ function padDown(i, vel) {
         return;
     }
     if (lastUp[i] && t - lastUp[i] < DOUBLE_MS) {     /* second tap: figer / liberer; the first tap's close is cancelled */
-        closeAt[i] = 0; toggleFreeze(i); consumed[i] = true; lastUp[i] = 0;
+        closeAt[i] = 0; closing[i] = false; toggleFreeze(i); consumed[i] = true; lastUp[i] = 0;
         return;
     }
     if (isOpen(i)) { wasOpen[i] = true; return; }      /* closing waits for the release (it may be a long press) */
     openVoice(i, vel); openedNow[i] = true;
     if (st[i] === 0) say('fouille ' + (card ? card.place : '...'));
-    paintRight(false);
+    paintRight(false, true);
 }
 function padUp(i) {
     const t = now(), held = downAt[i] ? t - downAt[i] : 0;
     downAt[i] = 0;
-    paintRight(false);
+    paintRight(false, true);
     if (consumed[i]) { consumed[i] = false; return; }
     if (leftUsed[i]) return;                           /* it targeted gestures: the sound stays as it is */
     if (openedNow[i]) { lastUp[i] = t; return; }       /* this press opened it */
-    if (wasOpen[i] && held < LONG_MS) { closeAt[i] = t + DOUBLE_MS; lastUp[i] = t; }   /* close, unless a double tap */
+    if (wasOpen[i] && held < LONG_MS) {                /* close, unless a double tap: the pad goes dark now */
+        closeAt[i] = t + DOUBLE_MS; lastUp[i] = t;
+        closing[i] = true; paintVoice(i, false, true);
+    }
 }
 function tickLeft() {
     const t = now();
@@ -332,7 +377,7 @@ function tickLeft() {
         if (downAt[i] && !longShown[i] && !consumed[i] && t - downAt[i] >= LONG_MS) {
             longShown[i] = true;
             say('son ' + (i + 1) + ' cible : touche un geste');
-            paintRight(false);
+            paintRight(false, true);
         }
     }
 }
@@ -356,8 +401,8 @@ function rightDown(i, vel) {
     if (undoHeld) {                                    /* Undo + pad: settings back to defaults, unlatched everywhere */
         spB('xr', String(g)); delete xpv[g];
         if (gLatch[g] > 0) { gLatch[g] = 0; sendX(-1, g, 0); }
-        for (let v = 0; v < NV; v++) if (vLatch[v][g] > 0) { vLatch[v][g] = 0; sendX(v, g, 0); paintVoice(v, false); }
-        say(X_NAMES[g] + ' : reinitialise'); paintRight(false);
+        for (let v = 0; v < NV; v++) if (vLatch[v][g] > 0) { vLatch[v][g] = 0; sendX(v, g, 0); paintVoice(v, false, true); }
+        say(X_NAMES[g] + ' : reinitialise'); paintRight(false, true);
         return;
     }
     if (!xready[g]) { say(X_NAMES[g] + ' : a venir'); return; }
@@ -374,10 +419,10 @@ function rightDown(i, vel) {
     }
     /* Shift on a latched gesture: unlatch it */
     if (shift) {
-        if (!voices && gLatch[g] > 0) { gLatch[g] = 0; sendX(-1, g, 0); say(X_NAMES[g] + ' libere'); paintRight(false); return; }
+        if (!voices && gLatch[g] > 0) { gLatch[g] = 0; sendX(-1, g, 0); say(X_NAMES[g] + ' libere'); paintRight(false, true); return; }
         if (voices && voices.every(v => vLatch[v][g] > 0)) {
-            for (const v of voices) { vLatch[v][g] = 0; sendX(v, g, 0); paintVoice(v, false); }
-            say(X_NAMES[g] + ' libere'); paintRight(false); return;
+            for (const v of voices) { vLatch[v][g] = 0; sendX(v, g, 0); paintVoice(v, false, true); }
+            say(X_NAMES[g] + ' libere'); paintRight(false, true); return;
         }
     }
     if (voices) {
@@ -389,26 +434,28 @@ function rightDown(i, vel) {
     rhOrder = rhOrder.filter(k => k !== i); rhOrder.push(i);
     if (voices) for (const v of voices) sendX(v, g, amt); else sendX(-1, g, amt);
     say(X_NAMES[g] + (voices ? ' sur ' + voices.map(v => v + 1).join(',') : '') + (shift ? ' (verrou)' : ''), 1200);
-    paintRight(false);
+    watchGesture(g, voices ? voices[0] : sel);
+    paintRight(false, true);
 }
 function rightUp(i) {
     const h = rh[i];
     rh[i] = null;
     rhOrder = rhOrder.filter(k => k !== i);
-    if (!h) { paintRight(false); return; }
+    if (!h) { paintRight(false, true); return; }
     const latch = h.latch || shift;                    /* Shift at press or at release keeps it */
     if (h.voices) {
         for (const v of h.voices) {
             if (latch) vLatch[v][h.g] = h.amt;
             sendX(v, h.g, vLatch[v][h.g] || 0);
-            paintVoice(v, false);
+            paintVoice(v, false, true);
         }
     } else {
         if (latch) gLatch[h.g] = h.amt;
         sendX(-1, h.g, gLatch[h.g] || 0);
     }
     if (latch) say(X_NAMES[h.g] + ' verrouille', 1000);
-    paintRight(false);
+    if (statusG === h.g) statusUntil = now() + (latch ? 4000 : (STATUS_LINGER[h.g] || 1200));
+    paintRight(false, true);
 }
 function rightPressure(i, p) {
     const h = rh[i];
@@ -467,6 +514,11 @@ function drawBottom() {
         fill_rect(0, 41, W, 23, 0);
         text(0, 43, fit((overlay.title || PAGES[page].name) + ' > ' + overlay.lbl, 21));
         text(0, 53, fit(overlay.txt, 21));
+        return;
+    }
+    if (statusG >= 0 && statusTxt) {                   /* the gesture in hand: what it does now */
+        text(0, 43, fit(X_NAMES[statusG] + ' > son ' + (statusV + 1), 21));
+        text(0, 53, fit(statusTxt, 21));
         return;
     }
     if (msg && now() < msgUntil) { text(0, 43, fit(msg, 21)); return; }
@@ -534,6 +586,7 @@ let resume = 0;
 globalThis.tick = function () {
     tickN++;
     if (tickN % 3 === 0) pollStates();
+    if (statusG >= 0 && tickN % 4 === 1) pollStatus();
     if (view === 0 && st[sel] === 3 && tickN % 2 === 0) { const p = parseFloat(gp('pos:' + sel)); if (!isNaN(p)) pos = p; }
     if (tickN % 40 === 7) { const n = gp('net'); if (n != null) net = n; }
     if (tickN % 45 === 11) loadCard();

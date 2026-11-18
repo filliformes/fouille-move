@@ -124,6 +124,9 @@ int   fe_gesture_ready(int g);                                    /* 1 = built i
 int   fe_gesture_format(int g, int k, float value01, char *buf, int len);
 void  fe_adopt(fe_engine *e, int v);                              /* Futur: play the prepared fragment now (v = -1: all) */
 int   fe_voice_has_next(const fe_engine *e, int v);               /* Futur: a next fragment is ready */
+int   fe_voice_open(const fe_engine *e, int v);                   /* held open (not closed, not in its tail) */
+/* One line on what gesture g is doing to voice v right now ("Derive 3.2 km E : ecoute..."). */
+int   fe_gesture_status(const fe_engine *e, int g, int v, char *buf, int len);
 
 /* Display string for a param value ("Plateau", "1.2 km", "120 ms"...). */
 int  fe_format(const fe_engine *e, int v, int id, float value01, char *buf, int len);

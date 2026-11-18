@@ -170,11 +170,14 @@ static void gesture_tests(float SR) {
     CHECK(gone.peak < 2e-3f, "released, it dies away (peak %.5f)", gone.peak);
     fe_destroy(e);
 
-    /* Contagion: a voice borrows from a neighbour on the map, not from a far one */
-    for (int k = 0; k < 3; k++) {                          /* 0: no contagion, 1: near (Mile End), 2: far (Kamouraska) */
+    /* Contagion: a voice borrows from a neighbour on the map, not from a far one.
+     * Voice 0 listens in Kamouraska, far from every Montreal sound; voice 1 is either there too or in Mile End. */
+    for (int k = 0; k < 3; k++) {                          /* 0: no contagion, 1: near (Kamouraska), 2: far (Mile End) */
         fe_engine *q = make(SR);
-        fe_set(q, 1, FE_P_PLACE, (k == 2 ? 19.0f : 1.0f) / 19.0f);
-        for (int t = 0; t < 400 && !(fe_voice_state(q, 1) >= FE_VS_READY && !fe_voice_busy(q, 1)); t++) { run(q, SR, 0.01f, 128, NULL); msleep(5); }
+        fe_set(q, 0, FE_P_PLACE, 19.0f / 19.0f);
+        fe_set(q, 1, FE_P_PLACE, (k == 2 ? 1.0f : 19.0f) / 19.0f);
+        run(q, SR, 0.01f, 128, NULL);
+        for (int t = 0; t < 600 && !(fe_voice_state(q, 1) >= FE_VS_READY && !fe_voice_busy(q, 1) && !fe_voice_busy(q, 0)); t++) { run(q, SR, 0.01f, 128, NULL); msleep(5); }
         fe_set(q, 1, FE_P_VOLUME, 0.0f);                  /* its matter, not its sound */
         fe_gesture_param(q, FE_X_CONTAGION, 2, 0.0f);
         fe_gate(q, 0, 1, 0.8f); fe_gate(q, 1, 1, 0.8f);
@@ -185,27 +188,47 @@ static void gesture_tests(float SR) {
         fe_destroy(q);
     }
     float near = diff_rms(a, b, N), far = diff_rms(a, c, N);
-    CHECK(near > 0.2f * buf_rms(a, N), "Contagion: the Plateau takes from Mile End (diff %.4f vs %.4f)", near, buf_rms(a, N));
-    CHECK(far < near * 0.2f, "and nearly nothing from Kamouraska (diff %.5f)", far);
+    CHECK(near > 0.2f * buf_rms(a, N), "Contagion: Kamouraska takes from its neighbour (diff %.4f vs %.4f)", near, buf_rms(a, N));
+    CHECK(far < near * 0.2f, "and nearly nothing from Mile End (diff %.5f)", far);
+    {   /* a closed sound nearby still lends its tape */
+        fe_engine *q = make(SR);
+        fe_set(q, 0, FE_P_PLACE, 19.0f / 19.0f); fe_set(q, 1, FE_P_PLACE, 19.0f / 19.0f);
+        run(q, SR, 0.01f, 128, NULL);
+        for (int t = 0; t < 600 && (fe_voice_busy(q, 0) || fe_voice_busy(q, 1)); t++) { run(q, SR, 0.01f, 128, NULL); msleep(5); }
+        fe_gesture_param(q, FE_X_CONTAGION, 2, 0.0f);
+        fe_gate(q, 0, 1, 0.8f); run(q, SR, 0.5f, 128, NULL);
+        render_to(q, a, N);
+        fe_gesture(q, 0, FE_X_CONTAGION, 1.0f); run(q, SR, 0.2f, 128, NULL);
+        render_to(q, b, N);
+        char st[64]; fe_gesture_status(q, FE_X_CONTAGION, 0, st, sizeof st);
+        CHECK(diff_rms(a, b, N) > 0.2f * buf_rms(a, N), "a closed sound nearby lends its tape (diff %.4f), '%s'", diff_rms(a, b, N), st);
+        fe_destroy(q);
+    }
 
-    /* Derive geosonique: the sound goes to listen nearby, then comes home */
+    /* Derive geosonique: a tap sends the sound to listen nearby; it stays there; Undo + Derive brings it home */
     e = make(SR);
     fe_card h0; fe_voice_card(e, 2, &h0);
     fe_gate(e, 2, 1, 0.8f); run(e, SR, 0.2f, 128, NULL);
-    fe_gesture(e, -1, FE_X_DERIVE, 0.5f);
+    fe_gesture(e, -1, FE_X_DERIVE, 0.5f); run(e, SR, 0.1f, 128, NULL);
+    fe_gesture(e, -1, FE_X_DERIVE, 0);                     /* let go before the pressure settled: a tap */
+    char ds[64]; run(e, SR, 0.05f, 128, NULL); fe_gesture_status(e, FE_X_DERIVE, 2, ds, sizeof ds);
     wait_card(e, 2, "km", 1, SR);
     fe_card h1; fe_voice_card(e, 2, &h1);
-    CHECK(strstr(h1.place, "km") != NULL, "Derive: voice 3 listens elsewhere ('%s' -> '%s')", h0.place, h1.place);
+    CHECK(strstr(h1.place, "km") != NULL, "Derive: a tap sends voice 3 elsewhere ('%s' -> '%s'), '%s'", h0.place, h1.place, ds);
     fe_card f3; fe_voice_card(e, 4, &f3);
     CHECK(strstr(f3.place, "km") == NULL, "a closed voice does not drift ('%s')", f3.place);
-    fe_gesture(e, -1, FE_X_DERIVE, 0);
-    wait_card(e, 2, "km", 0, SR);
+    for (int t = 0; t < 100; t++) { run(e, SR, 0.01f, 128, NULL); msleep(5); }
     fe_card h2; fe_voice_card(e, 2, &h2);
-    CHECK(strcmp(h2.place, h0.place) == 0, "released, it comes home ('%s')", h2.place);
+    fe_gesture_status(e, FE_X_DERIVE, 2, ds, sizeof ds);
+    CHECK(strstr(h2.place, "km") != NULL && strstr(ds, "arrive"), "released, it stays where it went ('%s', '%s')", h2.place, ds);
+    fe_gesture_reset(e, FE_X_DERIVE);
+    wait_card(e, 2, "km", 0, SR);
+    fe_card h3; fe_voice_card(e, 2, &h3);
+    CHECK(strcmp(h3.place, h0.place) == 0, "Undo + Derive brings it home ('%s')", h3.place);
     fe_freeze(e, 2, 1); fe_gesture(e, -1, FE_X_DERIVE, 0.5f);
     for (int t = 0; t < 200; t++) { run(e, SR, 0.01f, 128, NULL); msleep(5); }
-    fe_card h3; fe_voice_card(e, 2, &h3);
-    CHECK(strcmp(h3.place, h0.place) == 0, "a frozen voice stays home ('%s')", h3.place);
+    fe_card h4; fe_voice_card(e, 2, &h4);
+    CHECK(strcmp(h4.place, h0.place) == 0, "a frozen voice does not move ('%s')", h4.place);
     fe_destroy(e);
 
     free(a); free(b); free(c);
@@ -219,6 +242,14 @@ static float gaps(const float *b, int n, int sr) {
     mean /= nw > 0 ? nw : 1;
     for (int k = 0; k < nw; k++) if (lv[k] < 0.15f * mean) low++;
     return nw ? (float)low / nw : 0;
+}
+/* the level of the loudest tenth of 10 ms windows: how loud the strikes land */
+static float top_window(const float *b, int n, int sr) {
+    int w = sr / 100, nw = n / w; if (nw < 10) return 0;
+    float *r = malloc(sizeof(float) * (size_t)nw);
+    for (int k = 0; k < nw; k++) { double q = 0; for (int i = 0; i < w; i++) q += (double)b[k * w + i] * b[k * w + i]; r[k] = (float)sqrt(q / w); }
+    for (int i = 0; i < nw; i++) for (int j = i + 1; j < nw; j++) if (r[j] > r[i]) { float t = r[i]; r[i] = r[j]; r[j] = t; }
+    float x = r[nw / 10]; free(r); return x;
 }
 static fe_engine *two_open(float SR, int v) {          /* a fresh engine with voice v open and settled */
     fe_engine *q = make(SR);
@@ -298,6 +329,17 @@ static void gesture_tests2(float SR) {
     CHECK(bright(b, N) < bright(a, N) * 0.8f, "Reecriture wears the tape: darker after (%.3f -> %.3f)", bright(a, N), bright(b, N));
     CHECK(buf_rms(b, N) > 0.001f, "and it still sounds (rms %.4f)", buf_rms(b, N));
     fe_destroy(e);
+    {   /* on a whole 30 s fragment it is heard at once: the sweep wears what the head is about to play */
+        e = make(SR);
+        fe_gate(e, 4, 1, 1.0f); run(e, SR, 0.5f, 128, NULL);
+        render_to(e, a, N);
+        fe_gesture_param(e, FE_X_REECRITURE, 0, 1.0f);
+        fe_gesture(e, -1, FE_X_REECRITURE, 1.0f); run(e, SR, 1.0f, 128, NULL);
+        render_to(e, b, N);
+        char st[64]; fe_gesture_status(e, FE_X_REECRITURE, 4, st, sizeof st);
+        CHECK(bright(b, N) < bright(a, N) * 0.85f, "within a second, without waiting for a pass (%.3f -> %.3f), '%s'", bright(a, N), bright(b, N), st);
+        fe_destroy(e);
+    }
 
     /* Terne: strikes and silences; Double hasard: the same seed, the same draws */
     e = two_open(SR, 5);
@@ -309,6 +351,17 @@ static void gesture_tests2(float SR) {
     for (int f = 0; f < 5; f++) { fe_gesture_param(e, FE_X_TERNE, 0, f / 4.0f); x = run(e, SR, 1.0f, 128, NULL);
         CHECK(x.nan == 0 && x.peak <= 1 && rms(x) > 0.0005f, "family %d plays (rms %.4f)", f, rms(x)); }
     fe_gesture(e, -1, FE_X_TERNE, 0); fe_destroy(e);
+    {   /* the strikes land about at the held level, not far below it */
+        e = two_open(SR, 5);
+        render_to(e, a, N);
+        float pa = top_window(a, N, (int)SR), pb;
+        fe_gesture_param(e, FE_X_TERNE, 0, 0.25f);        /* Rafale */
+        fe_gesture(e, -1, FE_X_TERNE, 0.5f); run(e, SR, 0.3f, 128, NULL);
+        render_to(e, b, N);
+        pb = top_window(b, N, (int)SR);
+        CHECK(pb > 0.85f * pa, "Terne strikes reach the held level (loud 10 ms windows %.4f vs held %.4f)", pb, pa);
+        fe_gesture(e, -1, FE_X_TERNE, 0); fe_destroy(e);
+    }
     float *d2 = calloc((size_t)N, sizeof(float));
     for (int k = 0; k < 3; k++) {
         e = two_open(SR, 6);

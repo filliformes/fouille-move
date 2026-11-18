@@ -80,17 +80,17 @@ static const float X_DEF[FE_X_COUNT][FE_X_NPARAM] = {
     [FE_X_ACCROCHE]  = { 0.50f, 0.40f, 0.40f, 1.00f },  /* centre, largeur, vitesse de suivi, melange */
     [FE_X_CORPS]     = { 0.50f, 0.30f, 0.50f, 0.60f },  /* accord, matiere, brillance, melange */
     [FE_X_ETIREMENT] = { 0.50f, 0.60f, 0.50f, 0.00f },  /* plage min, plage max, courbe, lien a la vitesse */
-    [FE_X_CONTAGION] = { 0.50f, 0.50f, 0.30f, 0.50f },  /* portee, courbe, son source, stereo */
+    [FE_X_CONTAGION] = { 0.65f, 0.50f, 0.30f, 0.85f },  /* portee, courbe, son source, stereo */
     [FE_X_VOISIN]    = { 0.50f, 0.50f, 0.40f, 0.00f },  /* axe X (brillance), axe Y (intensite), fondu, lieu garde */
-    [FE_X_DERIVE]    = { 0.00f, 0.50f, 0.00f, 1.00f },  /* direction, rayon, vitesse, retour */
+    [FE_X_DERIVE]    = { 0.00f, 0.50f, 0.50f, 0.00f },  /* direction, rayon, vitesse, retour */
     [FE_X_GEL]       = { 0.30f, 0.20f, 0.30f, 0.40f },  /* respiration, derive, fondu d'entree, fondu de sortie */
     [FE_X_RESSAC]    = { 0.50f, 0.50f, 0.30f, 0.50f },  /* temps, filtre, dephasage, plafond */
     [FE_X_PASSE]     = { 0.00f, 0.40f, 0.30f, 0.00f },  /* reprise, fondu, usure du souvenir, decalage */
-    [FE_X_REECRITURE]= { 0.50f, 0.30f, 0.20f, 0.00f },  /* perte d'aigus, craquements, trous, source */
+    [FE_X_REECRITURE]= { 0.50f, 0.50f, 0.35f, 0.00f },  /* perte d'aigus, craquements, trous, source */
     [FE_X_TERNE]     = { 0.00f, 0.50f, 0.40f, 0.30f },  /* famille, ligne, delai, lissage */
     [FE_X_DOUBLE]    = { 0.50f, 0.00f, 0.30f, 0.20f },  /* familles permises, graine, memoire du tirage, retour */
     [FE_X_HESITATION]= { 0.40f, 0.40f, 0.00f, 0.20f },  /* tempo, instabilite, sons concernes, bascule */
-    [FE_X_FUTUR]     = { 0.40f, 0.40f, 0.00f, 0.00f },  /* fondu, filtre, position, source */
+    [FE_X_FUTUR]     = { 0.40f, 0.75f, 0.00f, 0.00f },  /* fondu, filtre, position, source */
 };
 static float mx_bong_rise(float x) { return 0.0005f * powf(100.0f, x); }   /* 0.5 .. 50 ms */
 static float mx_bong_fall(float x) { return 0.04f * powf(75.0f, x); }      /* 40 ms .. 3 s */
@@ -125,6 +125,7 @@ void fe_gesture_param(fe_engine *e, int g, int k, float x) {
 void fe_gesture_reset(fe_engine *e, int g) { if (xok(g)) push(e, EV_XRESET, 0, g, 0); }
 void fe_adopt(fe_engine *e, int v) { if (v >= -1 && v < FE_NV) push(e, EV_ADOPT, v < 0 ? FE_NV : v, 0, 0); }
 int  fe_voice_has_next(const fe_engine *e, int v) { return vok(v) && e->voices[v].next != NULL; }
+int  fe_voice_open(const fe_engine *e, int v) { return vok(v) ? atomic_load_explicit(&((fe_engine *)e)->voices[v].open_pub, memory_order_relaxed) : 0; }
 float fe_gesture_get(const fe_engine *e, int v, int g) {
     if (!xok(g)) return 0;
     if (v < 0) return e->gx[g];
@@ -214,6 +215,73 @@ int fe_gesture_format(int g, int k, float x, char *b, int len) {
     return snprintf(b, L, "%d%%", pc);
 }
 
+/* One line for the screen: what the gesture does to voice v now. Read from the UI thread:
+ * plain reads of audio-thread state, a display snapshot (a torn value only shows for one frame). */
+static int busy_of(const fe_engine *e, int v) {
+    const fe_voice *x = &e->voices[v];
+    return atomic_load(&((fe_voice *)x)->want) || atomic_load(&((fe_voice *)x)->searching) || atomic_load(&((fe_engine *)e)->pending) == v;
+}
+static void short_place(const fe_engine *e, int v, char *o, size_t L) {
+    const fe_voice *x = &e->voices[v];
+    const char *pl = x->tape->card.place[0] ? x->tape->card.place : FE_PLACES[step_of(FE_P_PLACE, x->p[FE_P_PLACE])].name;
+    snprintf(o, L, "%.12s", pl);
+    char *sp = strstr(o, " ");                        /* harvest names carry "place 1.2km E": keep the place */
+    if (sp && sp[1] >= '0' && sp[1] <= '9') *sp = 0;
+}
+int fe_gesture_status(const fe_engine *e, int g, int v, char *b, int len) {
+    size_t L = (size_t)len;
+    if (!xok(g) || !vok(v) || len < 8) return -1;
+    const fe_voice *x = &e->voices[v];
+    char pl[16]; short_place(e, v, pl, sizeof pl);
+    switch (g) {
+    case FE_X_DERIVE:
+        if (x->drift_km <= 0) return snprintf(b, L, busy_of(e, v) ? "retour : ecoute..." : "a la maison (%s)", pl);
+        return snprintf(b, L, "%.1f km %s : %s", x->drift_km, compass(x->drift_deg), busy_of(e, v) ? "ecoute..." : "arrive");
+    case FE_X_FUTUR:
+        if (x->next) return snprintf(b, L, "pret : %.12s (Shift)", x->next->card.place[0] ? x->next->card.place : "?");
+        if (x->want_next || (busy_of(e, v) && x->tape->frames > 64)) return snprintf(b, L, "prepare la suite...");
+        if (e->nfree <= 0) return snprintf(b, L, "plus de place");
+        return snprintf(b, L, x->tape->frames > 64 ? "rien de prepare" : "son vide");
+    case FE_X_CONTAGION: {
+        const float range = mx_cont_km(e->xp[g][0]), cexp = 0.5f + 2.5f * e->xp[g][1];
+        const float coslat = cosf(e->vlat[v] * (float)(M_PI / 180.0));
+        int best = -1, cnt = 0; float bw = 0, bd = 0;
+        for (int u = 0; u < FE_NV; u++) {
+            if (u == v || e->voices[u].tape->frames < 64) continue;
+            float dx = (e->vlon[u] - e->vlon[v]) * coslat * 111.32f, dy = (e->vlat[u] - e->vlat[v]) * 110.57f;
+            float d = sqrtf(dx * dx + dy * dy), w = expf(-powf(d / range, cexp));
+            if (w < 0.01f) continue;
+            cnt++;
+            if (w > bw) { bw = w; best = u; bd = d; }
+        }
+        if (best < 0) return snprintf(b, L, "personne a portee");
+        char o[16]; short_place(e, best, o, sizeof o);
+        return snprintf(b, L, "%.8s <- %.10s %.1fkm%s", pl, o, bd, cnt > 1 ? " +" : "");
+    }
+    case FE_X_VOISIN:
+        if (x->vn_u < 0 || x->vn_mix <= 0.01f) return snprintf(b, L, "cherche un voisin");
+        { char o[16]; short_place(e, x->vn_u, o, sizeof o); return snprintf(b, L, "<- son %d (%s)", x->vn_u + 1, o); }
+    case FE_X_PASSE:
+        if (!x->past || x->past->frames < 64) return snprintf(b, L, "pas encore de souvenir");
+        return snprintf(b, L, "souvenir : %.14s", x->past->card.place[0] ? x->past->card.place : "?");
+    case FE_X_REECRITURE:
+        if (e->xp[g][3] >= 0.5f) return snprintf(b, L, "ecrit le mix dans la bande");
+        return snprintf(b, L, "bande usee : %.1f passages", x->rw_done);
+    case FE_X_TERNE: case FE_X_DOUBLE:
+        return snprintf(b, L, "ligne : %s", T_FAM[x->t_fam < 0 ? 0 : x->t_fam > 4 ? 4 : x->t_fam]);
+    case FE_X_HESITATION: {
+        float bpm = mx_hes_bpm(e->xp[g][0]) / (e->hes_mult > 0 ? e->hes_mult : 1);
+        return snprintf(b, L, "pulse %d bpm", (int)(bpm + 0.5f));
+    }
+    case FE_X_ACCROCHE: return snprintf(b, L, "suit %d Hz", (int)(x->acc_hz + 0.5f));
+    case FE_X_ETIREMENT: return snprintf(b, L, "temps x%.2f", x->tf);
+    case FE_X_RESSAC: return snprintf(b, L, "retour %d%%", (int)(e->rs_ret * 100 + 0.5f));
+    case FE_X_GEL: return snprintf(b, L, "%s", x->gel_on ? "instant tenu" : "libre");
+    default: break;
+    }
+    return 0;
+}
+
 /* ── voice helpers (audio thread) ───────────────────────────────────────── */
 
 static void request_harvest(fe_engine *e, int vi) {
@@ -264,7 +332,7 @@ static void do_swap(fe_engine *e, int vi) {
     v->tape = e->spare;
     e->spare = v->past;
     v->past = old; v->past_pos = v->pos;
-    v->wear = 0; v->since_swap = 0;
+    v->wear = 0; v->since_swap = 0; v->rw_done = 0; v->rw_on = 0;
     compute_region(e, v);
     start_position(v, 0);
     atomic_store_explicit(&e->pending, -1, memory_order_release);   /* spare back to the worker */
@@ -276,7 +344,7 @@ static void do_adopt(fe_engine *e, fe_voice *v) {
     if (e->nfree < FE_NFUT) e->freet[e->nfree++] = v->past;
     v->past = v->tape; v->past_pos = v->pos;
     v->tape = v->next; v->next = NULL; v->next_mix = 0;
-    v->wear = 0; v->since_swap = 0;
+    v->wear = 0; v->since_swap = 0; v->rw_done = 0; v->rw_on = 0;
     compute_region(e, v);
     start_position(v, 1);
 }
@@ -341,7 +409,11 @@ static void apply_event(fe_engine *e, const fe_event *ev) {
         else v->vx[ev->id] = ev->val;
         break;
     case EV_XPARAM: e->xp[ev->id / FE_X_NPARAM][ev->id % FE_X_NPARAM] = ev->val; break;
-    case EV_XRESET: memcpy(e->xp[ev->id], X_DEF[ev->id], sizeof X_DEF[0]); break;
+    case EV_XRESET:
+        memcpy(e->xp[ev->id], X_DEF[ev->id], sizeof X_DEF[0]);
+        if (ev->id == FE_X_DERIVE)                                     /* Undo + Derive: every voice goes home */
+            for (int u = 0; u < FE_NV; u++) if (e->voices[u].drift_km > 0) { e->voices[u].drift_km = 0; e->voices[u].drift_redo = 1; }
+        break;
     }
 }
 
@@ -426,39 +498,47 @@ static void gestures_block(fe_engine *e, fe_voice *v, int vi, int n, int *bong_r
                 v->gel_go[0] = v->gel_go[1] = v->pos;
             } else if (T <= 0) v->gel_on = 0;
             break;
-        case FE_X_DERIVE:
+        case FE_X_DERIVE: {
             if (T > 0 && prev <= 0 && playing && !v->frozen) {
                 v->drift_armed = 1; v->drift_wait = 0.3f; v->drift_peak = T;  /* let the pressure settle */
                 v->drift_hop = 0;
             }
-            if (v->drift_armed && T > 0) {
-                v->drift_peak = fmaxf(v->drift_peak, T);
+            if (v->drift_armed && T > 0) v->drift_peak = fmaxf(v->drift_peak, T);
+            /* a tap is enough: letting go before the pressure settled leaves anyway */
+            const int left_early = T <= 0 && prev > 0 && v->drift_armed && v->drift_hop == 0;
+            if (v->drift_armed && (T > 0 || left_early)) {
                 v->drift_wait -= dt;
-                if (v->drift_wait <= 0) {
+                if (v->drift_wait <= 0 || left_early) {
                     float km = mx_drift_km(v->drift_peak);
                     float dir = e->xp[g][0];
                     float deg = dir < 0.04f ? 360.0f * fe_randf(&v->rng)
                                             : (dir - 0.04f) / 0.96f * 360.0f + (fe_randf(&v->rng) - 0.5f) * 30.0f;
-                    /* the first hop leaves from home; later hops walk on from where the voice is */
+                    /* the first hop leaves from where the voice is: a second tap walks on */
                     const float rad = (float)(M_PI / 180.0);
                     float x = km * sinf(deg * rad), y = km * cosf(deg * rad);
-                    if (v->drift_hop > 0) { x += v->drift_km * sinf(v->drift_deg * rad); y += v->drift_km * cosf(v->drift_deg * rad); }
+                    x += v->drift_km * sinf(v->drift_deg * rad); y += v->drift_km * cosf(v->drift_deg * rad);
                     v->drift_km = sqrtf(x * x + y * y);
                     v->drift_deg = atan2f(x, y) * (float)(180.0 / M_PI);
                     if (v->drift_deg < 0) v->drift_deg += 360.0f;
                     v->drift_redo = 1;                                 /* asked as soon as no harvest is waiting */
                     float hop = mx_drift_hop(e->xp[g][2]);
-                    if (hop > 0) { v->drift_wait = hop; v->drift_hop += 1; v->drift_peak = T; }
+                    v->drift_hop += 1;
+                    if (hop > 0 && T > 0) { v->drift_wait = hop; v->drift_peak = T; }   /* held or latched: the walk goes on */
                     else v->drift_armed = 0;
                 }
             }
             if (T <= 0 && prev > 0) {                                  /* let go */
                 v->drift_armed = 0;
-                if (e->xp[g][3] >= 0.5f && v->drift_km > 0 && !v->frozen) {
+                if (e->xp[g][3] >= 0.5f && v->drift_km > 0 && !v->frozen && !left_early) {
                     v->drift_km = 0;
-                    v->drift_redo = 1;                                 /* back home */
+                    v->drift_redo = 1;                                 /* Retour: back home */
                 }
             }
+            break;
+        }
+        case FE_X_REECRITURE:
+            if (T > 0 && !v->rw_on) { v->rw_on = 1; v->rw_sweep = v->pos; }
+            else if (T <= 0) v->rw_on = 0;
             break;
         case FE_X_PASSE:
             if (T > 0 && prev <= 0) {
@@ -701,14 +781,14 @@ static void render_voice(fe_engine *e, fe_voice *v, int vi, float *ml, float *mr
         const float coslat = cosf(e->vlat[vi] * (float)(M_PI / 180.0));
         float wsum = 0;
         for (int u = 0; u < FE_NV; u++) {
-            if (u == vi || !e->vrend[u]) continue;
+            if (u == vi || !(e->vrend[u] || e->vghost[u])) continue;
             float dx = (e->vlon[u] - e->vlon[vi]) * coslat * 111.32f, dy = (e->vlat[u] - e->vlat[vi]) * 110.57f;
             float d = sqrtf(dx * dx + dy * dy);
-            float w = expf(-powf(d / range, cexp));
+            float w = expf(-powf(d / range, cexp)) * (e->vrend[u] ? 1.0f : 0.7f);   /* a closed sound lends a little less */
             if (w < 0.01f) continue;
             wsum += w;
             float p = clampf(dx / range, -1, 1) * stereo;              /* east sounds come from the right */
-            float gl = w * (1.0f - 0.7f * p), gr = w * (1.0f + 0.7f * p), gs = w * (1.0f - 0.5f * fabsf(p));
+            float gl = w * (1.0f - p), gr = w * (1.0f + p), gs = w * (1.0f - 0.5f * fabsf(p));
             for (int k = 0; k < 2; k++) {
                 const float *L = e->vbuf + ((size_t)(u * 2 + k) * 2 + 0) * 512, *R = L + 512;
                 float *OL = k ? bl_post : bl_raw, *OR = k ? br_post : br_raw;
@@ -722,7 +802,7 @@ static void render_voice(fe_engine *e, fe_voice *v, int vi, float *ml, float *mr
             float k = 1.0f / wsum;
             for (int i = 0; i < n; i++) { bl_raw[i] *= k; br_raw[i] *= k; bl_post[i] *= k; br_post[i] *= k; }
         }
-        float share = 0.85f * c_a * fminf(1.0f, wsum), src = XP[FE_X_CONTAGION][2];   /* nobody near: nothing taken */
+        float share = c_a * fminf(1.0f, wsum), src = XP[FE_X_CONTAGION][2];   /* nobody near: nothing taken */
         c_raw = share * (1.0f - src); c_post = share * src;
     }
     float *my_raw_l = e->vbuf ? e->vbuf + ((size_t)(vi * 2 + 0) * 2) * 512 : NULL;
@@ -790,13 +870,48 @@ static void render_voice(fe_engine *e, fe_voice *v, int vi, float *ml, float *mr
     const int   rw_live = rw_a > 0.001f && hold != 2;
     const float *XR = XP[FE_X_REECRITURE];
     const float rw_lpa = 1.0f - expf(-2.0f * (float)M_PI * 18000.0f * powf(0.05f, XR[0]) / sr);
-    const float rw_rate = rw_a * 0.25f;
+    const float rw_rate = rw_a * 0.5f;
     const int   rw_mix = XR[3] >= 0.5f && e->lastmix;
+    if (rw_live && !rw_mix && v->loop_len > 64) {
+        /* the sound: a sweep runs through the region ahead of the head and wears it, so it is heard at once */
+        int K = (int)(v->loop_len * (float)n / (2.5f * tf * sr));
+        int Kmin = (int)(1.5f * (float)n * fabsf(spd_adv)) + 1;
+        if (K < Kmin) K = Kmin;
+        if (K > 2048) K = 2048;
+        const float a = v->loop_a, b = v->loop_a + v->loop_len;
+        float sw = v->rw_sweep;
+        if (sw < a || sw >= b) sw = v->pos;
+        for (int k = 0; k < K; k++) {
+            int idx = (int)sw;
+            if (idx >= 0 && idx < t->frames) {
+                int16_t *pc = t->pcm + 2 * idx;
+                for (int c = 0; c < 2; c++) {
+                    float x = (float)pc[c] * (1.0f / 32768.0f);
+                    v->rw_lp[c] = flush(v->rw_lp[c] + rw_lpa * (x - v->rw_lp[c]));
+                    float d = v->rw_hole > 0 ? v->rw_lp[c] * 0.05f : v->rw_lp[c];
+                    pc[c] = (int16_t)(clampf(x * (1.0f - rw_rate) + d * rw_rate, -1.0f, 1.0f) * 32767.0f);
+                }
+                if (fe_randf(&v->rng) < XR[1] * XR[1] * 0.004f * rw_a) {          /* a crackle */
+                    float q = (fe_randf(&v->rng) - 0.5f) * 1.2f * rw_a;
+                    pc[0] = (int16_t)clampf((float)pc[0] + q * 32767.0f, -32767, 32767);
+                    pc[1] = (int16_t)clampf((float)pc[1] + q * 26000.0f, -32767, 32767);
+                }
+                if (v->rw_hole > 0) v->rw_hole--;
+                else if (fe_randf(&v->rng) < XR[2] * 0.0004f * rw_a) v->rw_hole = (int)((0.005f + 0.075f * fe_randf(&v->rng)) * sr);
+            }
+            sw += rev ? -1.0f : 1.0f;
+            if (sw >= b) sw -= v->loop_len;
+            if (sw < a) sw += v->loop_len;
+        }
+        v->rw_sweep = sw;
+        v->rw_done += (float)K / v->loop_len;
+    }
     /* ternes */
     const int   t_live = v->t_on || v->t_mix > 0;
     const float t_rise = 1.0f / (0.001f * powf(60.0f, XP[FE_X_TERNE][3]) * tf * sr);
     const float t_fall = expf(-6.9f / (0.04f * powf(25.0f, XP[FE_X_TERNE][3]) * tf * sr));
     const float t_tgt = v->t_on ? 1.0f : 0.0f, t_step = 1.0f / (0.01f * sr);
+    const float t_vac_up = 1.0f - expf(-1.0f / (0.0012f * sr));
 
     for (int i = 0; i < n; i++) {
         /* envelope */
@@ -848,7 +963,7 @@ static void render_voice(fe_engine *e, fe_voice *v, int vi, float *ml, float *mr
                 float g1 = sqrtf(k), g2 = sqrtf(1 - k);
                 l = l * g1 + l2 * g2; r = r * g1 + r2 * g2;
             }
-            if (rw_live) {                                       /* Reecriture: the head writes back what it read, worn */
+            if (rw_live && rw_mix) {                             /* Reecriture, le mix: the head writes the output back into the tape */
                 int idx = (int)v->pos;
                 if (idx >= 0 && idx < t->frames) {
                     int16_t *pc = t->pcm + 2 * idx;
@@ -1006,10 +1121,11 @@ static void render_voice(fe_engine *e, fe_voice *v, int vi, float *ml, float *mr
             v->t_mix += t_tgt > v->t_mix ? fminf(t_step, t_tgt - v->t_mix) : -fminf(t_step, v->t_mix - t_tgt);
             if (v->t_stage == 1) { v->t_env += t_rise; if (v->t_env >= v->t_amp) { v->t_env = v->t_amp; v->t_stage = 2; } }
             else if (v->t_stage == 2) { v->t_env = flush(v->t_env * t_fall); }
-            tmul = 1.0f - v->t_mix + v->t_mix * v->t_env;
+            tmul = 1.0f - v->t_mix + v->t_mix * v->t_env * 2.0f;   /* make-up: a strike lands a little above the held level */
         }
         float cv = v->env * velc * (1.0f + 0.3f * v->press) * b_duck * tmul + bong_add;
-        v->vac += (cv - v->vac) * (cv > v->vac ? vac_up : vac_dn);
+        const float vu = t_live ? vac_up + (t_vac_up - vac_up) * v->t_mix : vac_up;   /* a terne strike hits the cell fast */
+        v->vac += (cv - v->vac) * (cv > v->vac ? vu : vac_dn);
         v->vac = flush(v->vac);
         if ((i & 7) == 0) {                                      /* the photoresistor is slow: control rate */
             float vac = clampf(v->vac, 0, 1.3f);
@@ -1148,6 +1264,27 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
         }
     }
 
+    /* Contagion: closed sounds still lend their tape (read where they would play), if anyone borrows */
+    int c_any = 0;
+    for (int vi = 0; vi < FE_NV && !c_any; vi++) c_any = e->voices[vi].xs[FE_X_CONTAGION] > 0.001f || eff(e, &e->voices[vi], FE_X_CONTAGION) > 0;
+    for (int u = 0; u < FE_NV; u++) {
+        fe_voice *g = &e->voices[u];
+        e->vghost[u] = 0;
+        if (!c_any || !e->vbuf || g->env_stage != ENV_OFF || g->tape->frames < 64 || g->loop_len < 64) continue;
+        const float a = g->loop_a, b = g->loop_a + g->loop_len;
+        if (g->ghost_pos < a || g->ghost_pos >= b) g->ghost_pos = a;
+        const float gv = 0.5f * g->p[FE_P_VOLUME] * g->p[FE_P_VOLUME] * 4.0f;
+        float *RL = e->vbuf + ((size_t)(u * 2 + 0) * 2) * 512, *PL = e->vbuf + ((size_t)(u * 2 + 1) * 2) * 512;
+        for (int i = 0; i < n; i++) {
+            float l, r; rd(g->tape, g->ghost_pos, &l, &r);
+            RL[i] = l * 0.6f; RL[512 + i] = r * 0.6f;
+            PL[i] = l * gv * 0.6f; PL[512 + i] = r * gv * 0.6f;
+            g->ghost_pos += 1.0f;
+            if (g->ghost_pos >= b) g->ghost_pos -= g->loop_len;
+        }
+        e->vghost[u] = 1;
+    }
+
     /* Hesitation: the shared pulse */
     float hes_any = 0;
     for (int vi = 0; vi < FE_NV; vi++) hes_any = fmaxf(hes_any, eff(e, &e->voices[vi], FE_X_HESITATION));
@@ -1171,7 +1308,7 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
             v->swapping = 0; v->duck = 1.0f;
             if (atomic_load(&e->pending) == vi) do_swap(e, vi);
             if (v->adopt) { v->adopt = 0; do_adopt(e, v); }
-            if (v->reseek) { v->reseek = 0; compute_region(e, v); start_position(v, 1); v->gel_on = 0; v->gel_mix = 0; }
+            if (v->reseek) { v->reseek = 0; compute_region(e, v); start_position(v, 1); }   /* Gel keeps its instant */
             v->env = 0; v->env_stage = ENV_RISE; reset_dsp(v);
         }
         if (v->env_stage == ENV_FALL && v->swapping) {
@@ -1189,6 +1326,7 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
         int st = v->tape->frames < 64 ? (atomic_load(&v->want) || atomic_load(&v->searching) ? FE_VS_SEARCHING : FE_VS_EMPTY)
                : (v->env_stage != ENV_OFF ? FE_VS_PLAYING : FE_VS_READY);
         atomic_store_explicit(&v->state_pub, st, memory_order_relaxed);
+        atomic_store_explicit(&v->open_pub, v->env_stage == ENV_RISE || v->env_stage == ENV_SUSTAIN || (v->swapping && v->env_stage != ENV_FALL), memory_order_relaxed);
     }
 
     /* Ressac: the output comes back as a source, delayed, filtered, phase-turned, bounded */
@@ -1199,7 +1337,7 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
     if (e->rs_amt < 1e-5f && rs_target <= 0) e->rs_amt = 0;
     const int rs_live = e->rs_l && (e->rs_ret > 1e-4f || rs_target > 0);
     int RD = 1, RD2 = 1;
-    float rs_fb = 0, rs_lpa = 0, rs_hpa = 0, rs_apc = 0, rs_ceil = 1;
+    float rs_fb = 0, rs_lpa = 0, rs_hpa = 0, rs_apc = 0, rs_ceil = 1, rs_wv = 0, rs_dt = 1, rs_gk = 0;
     if (rs_live) {
         const float *X = e->xp[FE_X_RESSAC];
         RD = (int)(mx_rs_time(X[0]) * e->sr);
@@ -1207,12 +1345,21 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
         if (RD2 >= e->rs_len) RD2 = e->rs_len - 1;
         if (RD >= e->rs_len) RD = e->rs_len - 1;
         if (RD < 1) RD = 1;
-        rs_fb = e->rs_amt * 0.85f;
+        rs_fb = e->rs_amt * 0.9f;
         rs_lpa = 1.0f - expf(-2.0f * (float)M_PI * (400.0f * powf(25.0f, X[1])) / e->sr);
         rs_hpa = 1.0f - expf(-2.0f * (float)M_PI * 90.0f / e->sr);
         rs_apc = X[2] * 0.7f;
-        rs_ceil = 0.08f + 0.6f * X[3];
+        rs_ceil = 0.12f + 0.8f * X[3];
+        /* waves: the return rises and recedes; as it rises the line stretches, so it comes back slower and lower */
+        float per = clampf(8.0f * mx_rs_time(X[0]), 1.5f, 8.0f);
+        e->rs_ph += dt / per; if (e->rs_ph >= 1.0f) e->rs_ph -= 1.0f;
+        rs_wv = 0.5f - 0.5f * cosf(2.0f * (float)M_PI * e->rs_ph);
+        rs_dt = (float)RD * (1.0f + 0.35f * rs_wv * fminf(1.0f, e->rs_amt * 1.5f));
+        if (rs_dt > (float)(e->rs_len - (RD2 - RD) - 2)) rs_dt = (float)(e->rs_len - (RD2 - RD) - 2);
+        if (e->rs_d < 1.0f) e->rs_d = rs_dt;
+        rs_gk = 1.0f - expf(-1.0f / (0.25f * e->sr));
     }
+    const float rs_gain = e->rs_ret * (0.3f + 1.5f * rs_wv) * 1.4f;   /* louder, in waves */
 
     /* echo pool: a dark feedback delay the voices send into */
     const float fb = e->g[FE_G_POOL_FB] * 0.92f;
@@ -1232,9 +1379,16 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
         float l = ml[i] + pl * 0.8f, r = mr[i] + pr * 0.8f;
         if (e->lastmix) e->lastmix[i] = (l + r) * 0.5f;
         if (rs_live) {
-            int a = e->rs_w - RD; if (a < 0) a += e->rs_len;
-            int b = e->rs_w - RD2; if (b < 0) b += e->rs_len;
-            float y[2] = { e->rs_l[a], e->rs_r[b] };
+            e->rs_d += (rs_dt - e->rs_d) * rs_gk;
+            float y[2];
+            for (int c = 0; c < 2; c++) {                              /* fractional read: the line glides */
+                float rp = (float)e->rs_w - e->rs_d - (c ? (float)(RD2 - RD) : 0.0f);
+                while (rp < 0) rp += (float)e->rs_len;
+                int i0 = (int)rp; float fr = rp - (float)i0;
+                int i1 = i0 + 1; if (i1 >= e->rs_len) i1 = 0;
+                const float *B = c ? e->rs_r : e->rs_l;
+                y[c] = B[i0] + (B[i1] - B[i0]) * fr;
+            }
             for (int c = 0; c < 2; c++) {
                 e->rs_lp[c] = flush(e->rs_lp[c] + rs_lpa * (y[c] - e->rs_lp[c]));
                 float x = e->rs_lp[c];
@@ -1247,7 +1401,7 @@ void fe_render(fe_engine *e, float *out_l, float *out_r, int frames) {
             e->rs_l[e->rs_w] = flush(rl[i] + y[1] * rs_fb);            /* crossed, like the pool */
             e->rs_r[e->rs_w] = flush(rr[i] + y[0] * rs_fb);
             if (++e->rs_w >= e->rs_len) e->rs_w = 0;
-            l += y[0] * e->rs_ret; r += y[1] * e->rs_ret;
+            l += y[0] * rs_gain; r += y[1] * rs_gain;
         }
         out_l[i] = tanhf(l) * mv;
         out_r[i] = tanhf(r) * mv;
@@ -1282,7 +1436,7 @@ fe_engine *fe_create(const fe_config *cfg) {
     e->pool_len = (int)(2.1f * e->sr);
     e->pool_l = calloc((size_t)e->pool_len, sizeof(float));
     e->pool_r = calloc((size_t)e->pool_len, sizeof(float));
-    e->rs_len = (int)(2.1f * e->sr);
+    e->rs_len = (int)(3.0f * e->sr);
     e->rs_l = calloc((size_t)e->rs_len, sizeof(float));
     e->rs_r = calloc((size_t)e->rs_len, sizeof(float));
     e->vbuf = calloc((size_t)FE_NV * 2 * 2 * 512, sizeof(float));

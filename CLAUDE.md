@@ -23,7 +23,7 @@ Voice architecture: 8-voice polyphonic, round-robin stealing.
 - `legacy/` — the v0.2 sound_generator, kept for reference, not built
 - Install path is now `modules/overtake/fouille/`; install by atomic rename (`scripts/install.sh`)
 
-## Right pads: gestures (v0.5.0)
+## Right pads: gestures (v0.5.1)
 - Grid by idea, top row first: Transformer (Bongo, Pulsars, Accroche, Corps), Déplacer (Étirement,
   Contagion, Voisin de timbre, Dérive géosonique), Se souvenir (Gel, Ressac, Passé, Réécriture),
   Deviner (Terne, Double hasard, Hésitation, Futur). Ids = `FE_X_*` in `engine/fe.h`.
@@ -42,6 +42,19 @@ Voice architecture: 8-voice polyphonic, round-robin stealing.
 - Left pads: tap opens at Départ exactly (no scatter); re-tap closes (after the 300 ms double-tap
   window); double tap = figer; Shift + tap = fouiller encore; reopening in a tail dips then restarts at Départ.
 - Names are Fouille's own (no module names from Interfera/Endogen): the knob 7 "Lock" stays a voice param.
+- v0.5.1 (Vincent played v0.5.0): LEDs like Loopex. Right pads = one colour per row (AzureBlue,
+  NeonPink, Purple, VividYellow), White when touched or latched. Left pads dark unless the sound
+  plays (`op` key = held open, not the tail); green, White = frozen, row colour = its own latched
+  gesture, BrightOrange = a Futur is ready. LEDs set at once on the hand's action (not queued).
+  A close goes dark at the release; the sound still closes after the 300 ms double-tap window.
+- Screen: holding a gesture shows `fe_gesture_status` (key `xst:g,v`) on the bottom two lines;
+  Dérive and Futur linger 8 s after release so the wait is visible.
+- Contagion also borrows from closed sounds (their tape read in place, `vghost`), full stereo by map
+  direction. Dérive: a tap is enough, it stays where it went (Retour off), Undo + Dérive = home.
+  Ressac: louder, in waves (period from Temps), the line stretches as the wave rises (slower, lower).
+  Réécriture: a sweep wears the region ahead of the head (heard within a second). Terne: make-up x2
+  and a fast vactrol on strikes (strikes land at the held level). Hésitation no longer resets Gel.
+  Futur less veiled (filter default 0.75). Saved states keep old gesture settings: Undo + pad resets.
 
 ## Repo structure (v0.2, legacy)
 - `src/dsp/fouille.c` — all DSP logic (vactrol LPG, fetch thread, corpus navigator, ternary envelope, render_block)

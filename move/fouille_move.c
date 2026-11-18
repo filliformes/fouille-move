@@ -17,7 +17,8 @@
  *
  * get_param keys:
  *   module_id, st (16 chars), card:v, pv:v, fmt:v,id,val, wave:v, pos:v,
- *   wear:v, net, gv, nplaces, state, xready (16 chars), xpv:g, xfmt:g,k,val
+ *   wear:v, net, gv, nplaces, state, xready (16 chars), xpv:g, xfmt:g,k,val,
+ *   op (16 chars, '1' = held open), xst:g,v (one status line)
  * Unknown keys return -1.
  */
 #define _POSIX_C_SOURCE 200809L
@@ -161,6 +162,17 @@ static int get_param(void *p, const char *key, char *buf, int len) {
         float la, lo, km;
         if (!fe_place_info(i, &la, &lo, &km)) return -1;
         return snprintf(buf, (size_t)len, "%s|%.4f|%.4f|%.2f", fe_place_name(i), la, lo, km);
+    }
+    if (!strcmp(key, "op")) {                      /* per voice: '1' = held open (not closed, not in its tail) */
+        if (len < FE_NV + 1) return -1;
+        for (int i = 0; i < FE_NV; i++) buf[i] = fe_voice_open(e, i) ? '1' : '0';
+        buf[FE_NV] = 0;
+        return FE_NV;
+    }
+    if (!strncmp(key, "xst:", 4)) {                /* what gesture g does to voice v now */
+        int g;
+        if (sscanf(key + 4, "%d,%d", &g, &v) != 2) return -1;
+        return fe_gesture_status(e, g, v, buf, len);
     }
     if (!strcmp(key, "xready")) {                  /* '1' = this pad is built */
         if (len < FE_X_COUNT + 1) return -1;

@@ -101,8 +101,9 @@ typedef struct {
     int   vn_u, vn_want;
     float vn_pos, vn_mix, vn_T;
     /* Reecriture */
-    float rw_lp[2];
-    int   rw_hole;
+    float rw_lp[2], rw_sweep, rw_done; /* the sweep wears the region ahead of the head; done = passes worn */
+    int   rw_hole, rw_on;
+    float ghost_pos;                   /* Contagion: a closed voice still lends its tape, read here */
     /* ternes: Terne, Double hasard, Hesitation */
     float t_env, t_amp, t_rise, t_line, t_mix;
     int   t_stage, t_k, t_fam, t_wait, t_on;
@@ -112,6 +113,7 @@ typedef struct {
     atomic_int want;                   /* worker: 1 = harvest wanted */
     fe_request req;                    /* valid when want == 1 */
     atomic_int state_pub;              /* FE_VS_* for readers */
+    atomic_int open_pub;               /* the gesture is held open (rise or sustain), for the pad LED */
     atomic_int searching;
 } fe_voice;
 
@@ -153,6 +155,7 @@ struct fe_engine {
     float gx[FE_X_COUNT];              /* global amounts */
     float xp[FE_X_COUNT][FE_X_NPARAM]; /* settings, knobs 5-8 */
     int    vrend[FE_NV];               /* voice rendered (Contagion sources) */
+    int    vghost[FE_NV];              /* closed voice whose tape was read into vbuf this block */
     float  vlat[FE_NV], vlon[FE_NV];   /* where each voice listens, this block */
     float *vbuf;                       /* Contagion: [FE_NV][2 kinds][2 ch][512], last block */
     fe_tape *freet[FE_NFUT];           /* Futur: free tapes (audio thread only) */
@@ -164,6 +167,7 @@ struct fe_engine {
     float *rs_l, *rs_r;                /* Ressac line */
     int    rs_len, rs_w;
     float  rs_lp[2], rs_hp[2], rs_ap[2], rs_amt, rs_ret;
+    float  rs_ph, rs_d;                /* Ressac waves: phase, current delay (samples, glides) */
 
     float *scratch_l, *scratch_r;      /* render mix, max_block */
     float *dec;                        /* worker: decoded float stereo at source rate */
