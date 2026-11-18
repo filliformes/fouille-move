@@ -1,10 +1,15 @@
 /*
  * Fouille — Overtake UI (QuickJS). Drives the engine via string params.
  *
- * Pads de gauche (16) = les voix. Tap = joue / arrete. Tenir = joue tant
- * qu'on tient. Double tap = figer / liberer. Shift + tap = fouiller encore.
+ * Pads de gauche (16) = les voix. Tap = ouvre le son a sa position 0 (Depart) ;
+ * re-tap = le ferme. Double tap = figer / liberer. Shift + tap = fouiller encore.
+ * Tenir un pad de gauche puis toucher des pads de droite = ces gestes sur ce son
+ * seulement (plusieurs pads de gauche tenus = ces sons ensemble, 4 gestes max par son).
  * Velocite = frappe du LPG ; pression = la voix s'ouvre.
- * Pads de droite (16) = les gestes : a jammer ensemble (etape 6).
+ * Pads de droite (16) = les gestes, une rangee par idee (haut : Transformer,
+ * Deplacer, Se souvenir, Deviner). Tenir = le geste joue ; velocite puis pression
+ * = intensite ; Shift + pad = verrouiller / deverrouiller ; Undo + pad = reglages
+ * par defaut ; knobs 5-8 = reglages du geste tenu.
  * Boutons de pas = choisir la voix. Gauche / Droite = page de reglages.
  * Molette = vue (Voix, Carte, Credits). Knobs 1-8 = la page de la voix choisie.
  * Back = suspendre (les voix continuent).
@@ -17,7 +22,9 @@ import {
     MoveKnob1, MoveSteps, MoveCopy, MoveMenu, MoveUndo, MoveCapture,
     WhiteLedOff, WhiteLedDim, WhiteLedBright,
 } from '/data/UserData/schwung/shared/constants.mjs';
+import * as C from '/data/UserData/schwung/shared/constants.mjs';
 import { setLED, setButtonLED, decodeDelta } from '/data/UserData/schwung/shared/input_filter.mjs';
+const GestOnVoice = (C.Blue !== undefined) ? C.Blue : 125;   /* a voice carrying its own latched gesture */
 
 const NV = 16;
 const W = 128;
@@ -49,12 +56,37 @@ const PAGES = [
 ];
 const VIEWS = ['Voix', 'Carte', 'Credits'];
 
+/* ---- gestures (ids mirror engine/fe.h FE_X_*): the grid, top row first ---- */
+const XN = 16;
+const X_NAMES = ['Bongo', 'Pulsars', 'Accroche', 'Corps',
+                 'Etirement', 'Contagion', 'Voisin de timbre', 'Derive geosonique',
+                 'Gel', 'Ressac', 'Passe', 'Reecriture',
+                 'Terne', 'Double hasard', 'Hesitation', 'Futur'];
+const X_KNOBS = {
+    0: ['Montee', 'Chute', 'Non-lineaire', 'Decalage'],
+    2: ['Centre', 'Largeur', 'Suivi', 'Melange'],
+    5: ['Portee', 'Courbe', 'Son source', 'Stereo'],
+    7: ['Direction', 'Rayon', 'Vitesse', 'Retour'],
+    8: ['Respiration', 'Derive', 'Fondu entree', 'Fondu sortie'],
+    9: ['Temps', 'Filtre', 'Dephasage', 'Plafond'],
+};
+function gOf(i) { return (3 - Math.floor(i / 4)) * 4 + (i % 4); }   /* right pad index (0 = bottom-left) -> gesture */
+const LONG_MS = 400, DOUBLE_MS = 300, MAX_PER_VOICE = 4;
+
 /* ---- state ---- */
 let sel = 0, page = 0, view = 0, tickN = 0, shift = false;
 const st = new Array(NV).fill(0);          /* engine state 0..3 */
 const busy = new Array(NV).fill(false), frozen = new Array(NV).fill(false), searching = new Array(NV).fill(false);
 const latched = new Array(NV).fill(false), downAt = new Array(NV).fill(0), consumed = new Array(NV).fill(false);
-const lastTap = new Array(NV).fill(0);
+const lastUp = new Array(NV).fill(0), openedNow = new Array(NV).fill(false), wasOpen = new Array(NV).fill(false);
+const closeAt = new Array(NV).fill(0), leftUsed = new Array(NV).fill(false), longShown = new Array(NV).fill(false);
+let xready = new Array(XN).fill(false);
+const gLatch = new Array(XN).fill(0);                       /* global latched amounts */
+const vLatch = []; for (let i = 0; i < NV; i++) vLatch.push(new Array(XN).fill(0));
+const rh = new Array(NV).fill(null);                       /* held right pads: {g, voices, amt, latch, pressed} */
+let rhOrder = [];                                          /* right pads in the order they were pressed */
+const xpv = {};                                            /* gesture settings cache, by gesture */
+let undoHeld = false;
 let pv = [];                                /* params of the selected voice */
 let gv = [0.6, 0.6, 0.45];
 let card = null, wave = '', pos = 0, net = '';
@@ -82,8 +114,10 @@ function drainLEDs() { let n = 8; while (n-- > 0 && ledQ.length) { const e = led
 /* No blinking anywhere: a pad changes colour only when its voice changes state.
  * (v0.3.0 blinked every searching pad at load: 16 pads flashing. Vincent: unpleasant.) */
 const padShown = new Array(NV).fill(-1);
+function hasOwn(v) { for (let g = 0; g < XN; g++) if (vLatch[v][g] > 0) return true; return false; }
 function voiceColor(i) {
     if (st[i] < 2) return searching[i] ? VeryDarkAzure : Black;      /* empty; dim blue = listening now */
+    if (st[i] === 3 && hasOwn(i)) return GestOnVoice;                 /* playing with its own latched gesture */
     if (st[i] === 3) return frozen[i] ? White : NeonGreen;
     return frozen[i] ? LightGrey : DarkMutedTeal;
 }
@@ -93,10 +127,29 @@ function paintVoice(i, force) {
     padShown[i] = c;
     if (force) setLED(LEFT[i], c, true); else enq(LEFT[i], c);
 }
+const rightShown = new Array(NV).fill(-1);
+function heldLeft() { const a = []; for (let i = 0; i < NV; i++) if (downAt[i]) a.push(i); return a; }
+function rightColor(i) {
+    const g = gOf(i);
+    if (!xready[g]) return Black;
+    if (rh[i]) return White;
+    const hl = heldLeft();
+    if (hl.length) return vLatch[hl[0]][g] > 0 ? LightGrey : DarkGrey;   /* holding a sound: show its own gestures */
+    return gLatch[g] > 0 ? LightGrey : DarkGrey;
+}
+function paintRight(force) {
+    for (let i = 0; i < NV; i++) {
+        const c = rightColor(i);
+        if (!force && c === rightShown[i]) continue;
+        rightShown[i] = c;
+        if (force) setLED(RIGHT[i], c, true); else enq(RIGHT[i], c);
+    }
+}
 function paintAll(force) {
+    paintRight(force);
     for (let i = 0; i < NV; i++) {
         paintVoice(i, force);
-        if (force) { setLED(RIGHT[i], Black, true); setLED(MoveSteps[i], i === sel ? White : Black, true); }
+        if (force) { setLED(MoveSteps[i], i === sel ? White : Black, true); }
         else enq(MoveSteps[i], i === sel ? White : Black);
     }
     setButtonLED(MoveLeft, page > 0 ? WhiteLedBright : WhiteLedDim, true);
@@ -170,7 +223,33 @@ function showKnob(k) {
     overlay = { lbl: d[1], txt: txt };
     overlayUntil = now() + 1500;
 }
+/* knobs 5-8 belong to the gesture being held */
+function heldGesture() {
+    for (let k = rhOrder.length - 1; k >= 0; k--) { const h = rh[rhOrder[k]]; if (h && xready[h.g]) return h.g; }
+    return -1;
+}
+function loadXp(g) {
+    if (xpv[g]) return xpv[g];
+    const s = gp('xpv:' + g);
+    xpv[g] = s ? s.split(',').map(parseFloat) : [0.5, 0.5, 0.5, 0.5];
+    return xpv[g];
+}
+function showGestureKnob(g, k) {
+    const names = X_KNOBS[g] || ['-', '-', '-', '-'];
+    const v = loadXp(g)[k];
+    const txt = gp('xfmt:' + g + ',' + k + ',' + (v || 0).toFixed(4)) || Math.round(v * 100) + '%';
+    overlay = { title: X_NAMES[g], lbl: names[k], txt: txt };
+    overlayUntil = now() + 1500;
+}
+function turnGestureKnob(g, k, delta) {
+    const a = loadXp(g);
+    a[k] = clamp((a[k] || 0) + delta * (shift ? 0.002 : 0.01));
+    queue('xp' + g + '_' + k, 'xp', g + ',' + k + ',' + a[k].toFixed(4));
+    showGestureKnob(g, k);
+}
 function turnKnob(k, delta) {
+    const hg = k >= 4 ? heldGesture() : -1;
+    if (hg >= 0) { turnGestureKnob(hg, k - 4, delta); return; }
     const d = knobDef(k);
     if (!d) return;
     if (d[0] < 0) {                                    /* global */
@@ -194,38 +273,128 @@ function turnKnob(k, delta) {
     showKnob(k);
 }
 
-/* ---- pads ---- */
+/* ---- left pads: the sounds ---- */
+function isOpen(i) { return latched[i] || st[i] === 3; }
+function openVoice(i, vel) { spB('g', i + ',1,' + vel.toFixed(3)); latched[i] = true; }
+function closeVoice(i) { spB('g', i + ',0,0'); latched[i] = false; }
+function toggleFreeze(i) {
+    spB('fz', i + ',' + (frozen[i] ? 0 : 1));
+    say(frozen[i] ? 'voix liberee' : 'voix figee');
+}
 function padDown(i, vel) {
     selectVoice(i);
     const t = now();
-    consumed[i] = false;
+    consumed[i] = false; openedNow[i] = false; wasOpen[i] = false; leftUsed[i] = false; longShown[i] = false;
+    downAt[i] = t;
     if (shift) {                                       /* fouiller encore */
         spB('rf', String(i)); consumed[i] = true;
         say('fouille encore : ' + (card ? card.place : ''));
         return;
     }
-    if (t - lastTap[i] < 300) {                         /* double tap: figer / liberer */
-        spB('fz', i + ',' + (frozen[i] ? 0 : 1));
-        say(frozen[i] ? 'voix liberee' : 'voix figee');
-        consumed[i] = true; lastTap[i] = 0;
+    if (lastUp[i] && t - lastUp[i] < DOUBLE_MS) {     /* second tap: figer / liberer; the first tap's close is cancelled */
+        closeAt[i] = 0; toggleFreeze(i); consumed[i] = true; lastUp[i] = 0;
         return;
     }
-    if (latched[i] || st[i] === 3) {                    /* playing: a tap stops it */
-        spB('g', i + ',0,0'); latched[i] = false; consumed[i] = true;
-        lastTap[i] = t;
-        return;
-    }
-    spB('g', i + ',1,' + vel.toFixed(3));
-    downAt[i] = t;
+    if (isOpen(i)) { wasOpen[i] = true; return; }      /* closing waits for the release (it may be a long press) */
+    openVoice(i, vel); openedNow[i] = true;
     if (st[i] === 0) say('fouille ' + (card ? card.place : '...'));
+    paintRight(false);
 }
 function padUp(i) {
     const t = now(), held = downAt[i] ? t - downAt[i] : 0;
     downAt[i] = 0;
+    paintRight(false);
     if (consumed[i]) { consumed[i] = false; return; }
-    if (held > 350) { spB('g', i + ',0,0'); latched[i] = false; }   /* tenir = momentane */
-    else { latched[i] = true; lastTap[i] = t; }                      /* tap = verrouille */
+    if (leftUsed[i]) return;                           /* it targeted gestures: the sound stays as it is */
+    if (openedNow[i]) { lastUp[i] = t; return; }       /* this press opened it */
+    if (wasOpen[i] && held < LONG_MS) { closeAt[i] = t + DOUBLE_MS; lastUp[i] = t; }   /* close, unless a double tap */
 }
+function tickLeft() {
+    const t = now();
+    for (let i = 0; i < NV; i++) {
+        if (closeAt[i] && t >= closeAt[i]) { closeAt[i] = 0; closeVoice(i); lastUp[i] = 0; }
+        if (downAt[i] && !longShown[i] && !consumed[i] && t - downAt[i] >= LONG_MS) {
+            longShown[i] = true;
+            say('son ' + (i + 1) + ' cible : touche un geste');
+            paintRight(false);
+        }
+    }
+}
+
+/* ---- right pads: the gestures ---- */
+function sendX(v, g, amt) {                           /* v = -1: all voices */
+    const key = 'x' + v + '_' + g;
+    sendQ.delete(key);
+    spB('x', v + ',' + g + ',' + amt.toFixed(3));
+}
+function queueX(v, g, amt) { queue('x' + v + '_' + g, 'x', v + ',' + g + ',' + amt.toFixed(3)); }
+function ownCount(v, g) {                             /* gestures on voice v, counting g */
+    const set = {};
+    for (let x = 0; x < XN; x++) if (vLatch[v][x] > 0) set[x] = 1;
+    for (const k of rhOrder) { const h = rh[k]; if (h && h.voices && h.voices.indexOf(v) >= 0) set[h.g] = 1; }
+    set[g] = 1;
+    return Object.keys(set).length;
+}
+function rightDown(i, vel) {
+    const g = gOf(i);
+    if (undoHeld) {                                    /* Undo + pad: settings back to defaults, unlatched everywhere */
+        spB('xr', String(g)); delete xpv[g];
+        if (gLatch[g] > 0) { gLatch[g] = 0; sendX(-1, g, 0); }
+        for (let v = 0; v < NV; v++) if (vLatch[v][g] > 0) { vLatch[v][g] = 0; sendX(v, g, 0); paintVoice(v, false); }
+        say(X_NAMES[g] + ' : reinitialise'); paintRight(false);
+        return;
+    }
+    if (!xready[g]) { say(X_NAMES[g] + ' : a venir'); return; }
+    let voices = heldLeft();
+    for (const v of voices) leftUsed[v] = true;
+    if (!voices.length) voices = null;
+    /* Shift on a latched gesture: unlatch it */
+    if (shift) {
+        if (!voices && gLatch[g] > 0) { gLatch[g] = 0; sendX(-1, g, 0); say(X_NAMES[g] + ' libere'); paintRight(false); return; }
+        if (voices && voices.every(v => vLatch[v][g] > 0)) {
+            for (const v of voices) { vLatch[v][g] = 0; sendX(v, g, 0); paintVoice(v, false); }
+            say(X_NAMES[g] + ' libere'); paintRight(false); return;
+        }
+    }
+    if (voices) {
+        const full = voices.filter(v => ownCount(v, g) > MAX_PER_VOICE);
+        if (full.length) { say(MAX_PER_VOICE + ' gestes max par son'); return; }
+    }
+    const amt = Math.max(0.05, vel);
+    rh[i] = { g: g, voices: voices, amt: amt, latch: shift, pressed: false };
+    rhOrder = rhOrder.filter(k => k !== i); rhOrder.push(i);
+    if (voices) for (const v of voices) sendX(v, g, amt); else sendX(-1, g, amt);
+    say(X_NAMES[g] + (voices ? ' sur ' + voices.map(v => v + 1).join(',') : '') + (shift ? ' (verrou)' : ''), 1200);
+    paintRight(false);
+}
+function rightUp(i) {
+    const h = rh[i];
+    rh[i] = null;
+    rhOrder = rhOrder.filter(k => k !== i);
+    if (!h) { paintRight(false); return; }
+    const latch = h.latch || shift;                    /* Shift at press or at release keeps it */
+    if (h.voices) {
+        for (const v of h.voices) {
+            if (latch) vLatch[v][h.g] = h.amt;
+            sendX(v, h.g, vLatch[v][h.g] || 0);
+            paintVoice(v, false);
+        }
+    } else {
+        if (latch) gLatch[h.g] = h.amt;
+        sendX(-1, h.g, gLatch[h.g] || 0);
+    }
+    if (latch) say(X_NAMES[h.g] + ' verrouille', 1000);
+    paintRight(false);
+}
+function rightPressure(i, p) {
+    const h = rh[i];
+    if (!h) return;
+    const amt = Math.max(0.1, p);                      /* the pressure takes over from the velocity */
+    if (Math.abs(amt - h.amt) < 0.01) return;
+    h.amt = amt;
+    if (h.voices) for (const v of h.voices) queueX(v, h.g, amt); else queueX(-1, h.g, amt);
+}
+
 const lastPress = new Array(NV).fill(0);
 function padPressure(i, p) {
     const t = now();
@@ -272,7 +441,7 @@ function drawWave() {
 function drawBottom() {
     if (overlay && now() < overlayUntil) {
         fill_rect(0, 41, W, 23, 0);
-        text(0, 43, PAGES[page].name + ' > ' + overlay.lbl);
+        text(0, 43, fit((overlay.title || PAGES[page].name) + ' > ' + overlay.lbl, 21));
         text(0, 53, fit(overlay.txt, 21));
         return;
     }
@@ -322,7 +491,12 @@ function draw() {
 }
 
 /* ---- lifecycle ---- */
+function loadReady() {
+    const r = gp('xready');
+    if (r && r.length >= XN) for (let g = 0; g < XN; g++) xready[g] = r.charAt(g) === '1';
+}
 globalThis.init = function () {
+    loadReady();
     loadPlaces();
     pollStates();
     loadParams(); loadCard();
@@ -330,7 +504,7 @@ globalThis.init = function () {
     say('Fouille : 16 voix ecoutent', 2500);
 };
 globalThis.onUnload = function () { clearAll(); };
-globalThis.onResume = function () { pollStates(); loadParams(); loadCard(); paintAll(true); resume = 2; };
+globalThis.onResume = function () { loadReady(); pollStates(); loadParams(); loadCard(); paintAll(true); resume = 2; };
 let resume = 0;
 
 globalThis.tick = function () {
@@ -341,6 +515,7 @@ globalThis.tick = function () {
     if (tickN % 45 === 11) loadCard();
     if (view === 1 && tickN % 30 === 3) for (let i = 0; i < NV; i++) { const s = gp('pv:' + i); if (s) pvCache[i] = parseFloat(s.split(',')[0]); }
     if (resume > 0 && tickN % 8 === 0) { resume--; paintAll(true); }
+    tickLeft();
     drainQ();
     drainLEDs();
     draw();
@@ -351,6 +526,7 @@ globalThis.onMidiMessageInternal = function (data) {
     if (status === 0xb0) {
         if (d1 === MoveBack && d2 > 0) { clearAll(); host_exit_module(); return; }
         if (d1 === MoveShift) { shift = d2 > 0; setButtonLED(MoveShift, shift ? WhiteLedBright : WhiteLedDim, true); return; }
+        if (d1 === MoveUndo) { undoHeld = d2 > 0; return; }
         if ((d1 === MoveLeft || d1 === MoveRight) && d2 > 0) {
             page = Math.max(0, Math.min(PAGES.length - 1, page + (d1 === MoveRight ? 1 : -1)));
             overlay = { lbl: PAGES[page].name, txt: PAGES[page].k.map(d => d ? d[1].substring(0, 4) : '-').join(' ') };
@@ -364,12 +540,19 @@ globalThis.onMidiMessageInternal = function (data) {
     }
     if (status === 0x90 || status === 0x80) {
         const on = status === 0x90 && d2 > 0;
-        if (d1 <= 7) { if (on) showKnob(d1); return; }                         /* knob touch */
+        if (d1 <= 7) {                                                         /* knob touch */
+            if (on) { const hg = d1 >= 4 ? heldGesture() : -1; if (hg >= 0) showGestureKnob(hg, d1 - 4); else showKnob(d1); }
+            return;
+        }
         if (d1 in N2L) { if (on) padDown(N2L[d1], d2 / 127); else padUp(N2L[d1]); return; }
-        if (d1 in N2R) { if (on) say('gestes : a jammer ensemble'); return; }
+        if (d1 in N2R) { if (on) rightDown(N2R[d1], d2 / 127); else rightUp(N2R[d1]); return; }
         if (d1 in S2V) { if (on) selectVoice(S2V[d1]); return; }
         return;
     }
-    if (status === 0xa0) { if (d1 in N2L) padPressure(N2L[d1], d2 / 127); return; }
+    if (status === 0xa0) {
+        if (d1 in N2L) padPressure(N2L[d1], d2 / 127);
+        else if (d1 in N2R) rightPressure(N2R[d1], d2 / 127);
+        return;
+    }
 };
 globalThis.onMidiMessageExternal = function (data) { };

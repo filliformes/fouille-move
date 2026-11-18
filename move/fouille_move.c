@@ -9,11 +9,14 @@
  *   fz  "v,on"         figer / liberer
  *   p   "v,id,val"     voice parameter (normalized)
  *   gp  "id,val"       global parameter
+ *   x   "v,g,amt"      gesture amount (v = -1: all voices), right pads
+ *   xp  "g,k,val"      gesture setting (knobs 5-8)
+ *   xr  "g"            gesture settings back to defaults
  *   state  <blob>      restore (from get_param("state"))
  *
  * get_param keys:
  *   module_id, st (16 chars), card:v, pv:v, fmt:v,id,val, wave:v, pos:v,
- *   wear:v, net, gv, nplaces, state
+ *   wear:v, net, gv, nplaces, state, xready (16 chars), xpv:g, xfmt:g,k,val
  * Unknown keys return -1.
  */
 #define _POSIX_C_SOURCE 200809L
@@ -71,8 +74,11 @@ static void set_param(void *p, const char *key, const char *val) {
     if (!strcmp(key, "fz")) { if (sscanf(val, "%d,%d", &v, &a) == 2) fe_freeze(s->e, v, a); return; }
     if (!strcmp(key, "p"))  { if (sscanf(val, "%d,%d,%f", &v, &a, &x) == 3) fe_set(s->e, v, a, x); return; }
     if (!strcmp(key, "gp")) { if (sscanf(val, "%d,%f", &a, &x) == 2) fe_set_global(s->e, a, x); return; }
+    if (!strcmp(key, "x"))  { if (sscanf(val, "%d,%d,%f", &v, &a, &x) == 3) fe_gesture(s->e, v, a, x); return; }
+    if (!strcmp(key, "xp")) { if (sscanf(val, "%d,%d,%f", &v, &a, &x) == 3) fe_gesture_param(s->e, v, a, x); return; }
+    if (!strcmp(key, "xr")) { if (sscanf(val, "%d", &v) == 1) fe_gesture_reset(s->e, v); return; }
     if (!strcmp(key, "state")) {
-        /* "G:g0,g1,g2;V0:p0,...;V1:...;F:frozen bits" — whitespace tolerant */
+        /* "G:g0,g1,g2;V0:p0,...;V1:...;F:frozen bits;X:x0,...(16 x 4)" — whitespace tolerant */
         const char *q = val;
         while (*q) {
             while (*q == ' ' || *q == '\n' || *q == '\r' || *q == '\t' || *q == ';') q++;
@@ -85,6 +91,13 @@ static void set_param(void *p, const char *key, const char *val) {
                 for (int i = 0; i < FE_P_COUNT; i++) {
                     float f = strtof(q, &end); if (end == q) break;
                     if (vi >= 0 && vi < FE_NV) fe_set(s->e, (int)vi, i, f);
+                    q = end; if (*q == ',') q++;
+                }
+            } else if (*q == 'X' && q[1] == ':') {           /* gesture settings, g*4+k */
+                q += 2;
+                for (int i = 0; i < FE_X_COUNT * FE_X_NPARAM; i++) {
+                    char *end; float f = strtof(q, &end); if (end == q) break;
+                    fe_gesture_param(s->e, i / FE_X_NPARAM, i % FE_X_NPARAM, f);
                     q = end; if (*q == ',') q++;
                 }
             } else if (*q == 'F' && q[1] == ':') {
@@ -147,6 +160,22 @@ static int get_param(void *p, const char *key, char *buf, int len) {
         if (!fe_place_info(i, &la, &lo, &km)) return -1;
         return snprintf(buf, (size_t)len, "%s|%.4f|%.4f|%.2f", fe_place_name(i), la, lo, km);
     }
+    if (!strcmp(key, "xready")) {                  /* '1' = this pad is built */
+        if (len < FE_X_COUNT + 1) return -1;
+        for (int g = 0; g < FE_X_COUNT; g++) buf[g] = fe_gesture_ready(g) ? '1' : '0';
+        buf[FE_X_COUNT] = 0;
+        return FE_X_COUNT;
+    }
+    if (!strncmp(key, "xpv:", 4)) {
+        int g = atoi(key + 4);
+        if (g < 0 || g >= FE_X_COUNT) return -1;
+        return snprintf(buf, (size_t)len, "%.4f,%.4f,%.4f,%.4f", fe_gesture_param_get(e, g, 0), fe_gesture_param_get(e, g, 1),
+                        fe_gesture_param_get(e, g, 2), fe_gesture_param_get(e, g, 3));
+    }
+    if (!strncmp(key, "xfmt:", 5)) {
+        if (sscanf(key + 5, "%d,%d,%f", &v, &id, &x) != 3) return -1;
+        return fe_gesture_format(v, id, x, buf, len);
+    }
     if (!strcmp(key, "nplaces"))   return snprintf(buf, (size_t)len, "%d", fe_place_count());
     if (!strcmp(key, "gv"))        return snprintf(buf, (size_t)len, "%.4f,%.4f,%.4f", fe_get_global(e, 0), fe_get_global(e, 1), fe_get_global(e, 2));
     if (!strcmp(key, "state")) {
@@ -158,6 +187,11 @@ static int get_param(void *p, const char *key, char *buf, int len) {
             bits |= fe_voice_frozen(e, i) << i;
         }
         n += snprintf(buf + n, (size_t)(len - n), ";F:%d", bits);
+        if (n < len - FE_X_COUNT * FE_X_NPARAM * 6 - 4) {
+            n += snprintf(buf + n, (size_t)(len - n), ";X:");
+            for (int i = 0; i < FE_X_COUNT * FE_X_NPARAM; i++)
+                n += snprintf(buf + n, (size_t)(len - n), i ? ",%.3f" : "%.3f", fe_gesture_param_get(e, i / FE_X_NPARAM, i % FE_X_NPARAM));
+        }
         return n;
     }
     return -1;

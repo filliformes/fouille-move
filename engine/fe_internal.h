@@ -32,11 +32,12 @@ typedef struct {
 typedef struct {
     int place, source;
     float radius_scale;
+    float drift_km, drift_deg;         /* Derive geosonique: offset from the place (0 = at home) */
 } fe_request;
 
 typedef struct { uint8_t type, v, id; float val; } fe_event;
 
-enum { EV_GATE_ON = 1, EV_GATE_OFF, EV_PRESS, EV_REFETCH, EV_FREEZE, EV_SET, EV_GSET };
+enum { EV_GATE_ON = 1, EV_GATE_OFF, EV_PRESS, EV_REFETCH, EV_FREEZE, EV_SET, EV_GSET, EV_GEST, EV_XPARAM, EV_XRESET };
 enum { ENV_OFF = 0, ENV_RISE, ENV_SUSTAIN, ENV_FALL };
 
 typedef struct {
@@ -56,6 +57,7 @@ typedef struct {
     float grain_ph[2], grain_org[2];
     float duck;                        /* 1 = open; ramps to 0 before a swap */
     int   swapping;
+    int   reseek;                      /* after the duck: back to position 0 (reopen in a tail) */
     float wear;                        /* 0 fresh .. 1 breath */
     int   frozen;
     double since_swap;                 /* seconds */
@@ -69,6 +71,20 @@ typedef struct {
     float hiss_lp;
     fe_drift dpitch, dpan, dpos;
     uint32_t rng;
+
+    /* gestures */
+    float vx[FE_X_COUNT];              /* this voice's own amounts */
+    float xt_prev[FE_X_COUNT];         /* last effective target, for onsets */
+    float xs[FE_X_COUNT];              /* smoothed effective amounts */
+    float bong, bong_rel, bong_min, bong_peak;   /* Bongo strike */
+    int   bong_stage, bong_delay;
+    float gel_mix, gel_org, gel_ph[2], gel_go[2], gel_breath; /* Gel */
+    int   gel_on;
+    float acc_hz, acc_lp, acc_prev, acc_cnt, acc_s1[2], acc_s2[2]; /* Accroche */
+    int   acc_arm;
+    float drift_km, drift_deg;         /* Derive: where the voice is now (0 = home) */
+    float drift_wait, drift_peak, drift_hop;
+    int   drift_armed, drift_redo;
 
     atomic_int want;                   /* worker: 1 = harvest wanted */
     fe_request req;                    /* valid when want == 1 */
@@ -109,6 +125,16 @@ struct fe_engine {
     atomic_int  harvests, failures;
     char        net_msg[48];
     uint32_t    wrng;
+
+    /* gestures */
+    float gx[FE_X_COUNT];              /* global amounts */
+    float xp[FE_X_COUNT][FE_X_NPARAM]; /* settings, knobs 5-8 */
+    int    vrend[FE_NV];               /* voice rendered (Contagion sources) */
+    float  vlat[FE_NV], vlon[FE_NV];   /* where each voice listens, this block */
+    float *vbuf;                       /* Contagion: [FE_NV][2 kinds][2 ch][512], last block */
+    float *rs_l, *rs_r;                /* Ressac line */
+    int    rs_len, rs_w;
+    float  rs_lp[2], rs_hp[2], rs_ap[2], rs_amt, rs_ret;
 
     float *scratch_l, *scratch_r;      /* render mix, max_block */
     float *dec;                        /* worker: decoded float stereo at source rate */

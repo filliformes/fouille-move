@@ -101,6 +101,28 @@ int   fe_net_status(const fe_engine *e, char *buf, int len); /* short line for t
 int         fe_place_count(void);
 const char *fe_place_name(int i);
 int         fe_place_info(int i, float *lat, float *lon, float *radius_km);
+/* ── Gestures: the 16 right pads ─────────────────────────────────────────
+ * A gesture has an amount 0..1 (0 = off) and four settings (knobs 5-8).
+ * fe_gesture(v = -1) sets the global amount, heard by every voice; a voice's
+ * own amount (v >= 0) adds to it: the voice hears the larger of the two.
+ * Ids follow the grid, top row first, left to right. */
+enum {
+    FE_X_BONGO = 0, FE_X_PULSARS, FE_X_ACCROCHE, FE_X_CORPS,
+    FE_X_ETIREMENT, FE_X_CONTAGION, FE_X_VOISIN, FE_X_DERIVE,
+    FE_X_GEL, FE_X_RESSAC, FE_X_PASSE, FE_X_REECRITURE,
+    FE_X_TERNE, FE_X_DOUBLE, FE_X_HESITATION, FE_X_FUTUR,
+    FE_X_COUNT
+};
+#define FE_X_NPARAM 4
+void  fe_gesture(fe_engine *e, int v, int g, float amount);       /* v = -1: all voices */
+void  fe_gesture_param(fe_engine *e, int g, int k, float value01);
+void  fe_gesture_reset(fe_engine *e, int g);                      /* settings back to defaults */
+float fe_gesture_get(const fe_engine *e, int v, int g);           /* v = -1: global amount */
+float fe_gesture_param_get(const fe_engine *e, int g, int k);
+float fe_gesture_param_default(int g, int k);
+int   fe_gesture_ready(int g);                                    /* 1 = built in this version */
+int   fe_gesture_format(int g, int k, float value01, char *buf, int len);
+
 /* Display string for a param value ("Plateau", "1.2 km", "120 ms"...). */
 int  fe_format(const fe_engine *e, int v, int id, float value01, char *buf, int len);
 int  fe_steps(int id);                                        /* >0: enum with n steps */

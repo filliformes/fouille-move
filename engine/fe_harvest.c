@@ -466,8 +466,30 @@ static int src_freesound(fe_engine *e, fe_tape *t, const fe_place *pl, float rkm
     return 1;
 }
 
-static int harvest(fe_engine *e, const fe_request *rq, fe_tape *t) {
+/* The point a request listens at: its place, moved by a Derive geosonique.
+ * name gets "Plateau 2.1km NE" when the voice has drifted. */
+static const char *compass8(float deg) {
+    static const char *c[] = { "N", "NE", "E", "SE", "S", "SO", "O", "NO" };
+    return c[(int)floorf(fmodf(deg + 22.5f + 360.0f, 360.0f) / 45.0f) & 7];
+}
+static void request_point(const fe_request *rq, fe_place *out, char *name, int nlen) {
     const fe_place *pl = &FE_PLACES[rq->place < 0 || rq->place >= FE_NPLACES ? 0 : rq->place];
+    *out = *pl;
+    snprintf(name, (size_t)nlen, "%s", pl->name);
+    if (rq->drift_km > 0.01f) {
+        float a = rq->drift_deg * (float)(M_PI / 180.0);
+        out->lat += rq->drift_km * cosf(a) / 110.57f;
+        out->lon += rq->drift_km * sinf(a) / (111.32f * cosf(out->lat * (float)(M_PI / 180.0)));
+        out->radius_km = fminf(pl->radius_km, 1.5f);           /* listen around the new spot, not the whole place */
+        snprintf(name, (size_t)nlen, "%.12s %.1fkm %s", pl->name, rq->drift_km, compass8(rq->drift_deg));
+    }
+    out->name = name;
+}
+
+static int harvest(fe_engine *e, const fe_request *rq, fe_tape *t) {
+    fe_place here; char name[32];
+    request_point(rq, &here, name, sizeof name);
+    const fe_place *pl = &here;
     float rkm = pl->radius_km * rq->radius_scale;
     int order[2];
     switch (rq->source) {
@@ -525,6 +547,8 @@ static void *worker(void *arg) {
         }
         if (!ok && (e->cfg.offline || v->tape->frames < 64)) { /* an empty voice still gets something to play */
             fe_synth_fill(t, e->sr, &e->wrng, rq.place);
+            if (rq.drift_km > 0.01f) { fe_place here; char name[32]; request_point(&rq, &here, name, sizeof name);
+                                       snprintf(t->card.place, sizeof t->card.place, "%s", name); }
             ok = 1;
         }
         if (ok && atomic_load(&e->running)) {

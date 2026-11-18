@@ -23,6 +23,20 @@ Voice architecture: 8-voice polyphonic, round-robin stealing.
 - `legacy/` — the v0.2 sound_generator, kept for reference, not built
 - Install path is now `modules/overtake/fouille/`; install by atomic rename (`scripts/install.sh`)
 
+## Right pads: gestures (v0.4.0)
+- Grid by idea, top row first: Transformer (Bongo, Pulsars, Accroche, Corps), Déplacer (Étirement,
+  Contagion, Voisin de timbre, Dérive géosonique), Se souvenir (Gel, Ressac, Passé, Réécriture),
+  Deviner (Terne, Double hasard, Hésitation, Futur). Ids = `FE_X_*` in `engine/fe.h`.
+- Built so far: Bongo, Accroche, Contagion, Dérive géosonique, Gel, Ressac (`fe_gesture_ready`). The
+  others light no LED and say "à venir".
+- A gesture has an amount (0 = off) and 4 settings (knobs 5-8). Global amount (v = -1) + per-voice
+  amount; a voice hears the larger. Onsets are detected in the engine (`gestures_block`).
+- UI: hold = plays; velocity then pressure = amount; Shift = latch/unlatch; Undo + pad = default
+  settings; hold left pad(s) then right pads = those sounds only (4 gestures max per sound).
+- Left pads: tap opens at Départ exactly (no scatter); re-tap closes (after the 300 ms double-tap
+  window); double tap = figer; Shift + tap = fouiller encore; reopening in a tail dips then restarts at Départ.
+- Names are Fouille's own (no module names from Interfera/Endogen): the knob 7 "Lock" stays a voice param.
+
 ## Repo structure (v0.2, legacy)
 - `src/dsp/fouille.c` — all DSP logic (vactrol LPG, fetch thread, corpus navigator, ternary envelope, render_block)
 - `src/module.json` — module metadata and version (must match git tag on release)
